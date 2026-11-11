@@ -1,0 +1,233 @@
+{
+  "id": "RiaWf04Lembretes",
+  "name": "Recepcionista IA - 04 Lembretes",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 04 · Lembretes\nA cada 15 min, `ria.api_reminders_claim` reivindica de forma atômica as consultas confirmadas que entram na janela de lembrete (padrão 24h). A restrição UNIQUE(consulta, tipo) impede disparo duplicado.\n\n- Consultas canceladas ou pacientes com opt-out: não recebem (registrado como *skipped*).\n- Paciente fora da janela de 24h: usa o **template Utility aprovado** (`reminder_template`), com botões Confirmar/Remarcar.\n- Dentro da janela: mensagem interativa com botões.\n- Resultado (sent/failed) registrado; status de entrega atualizado pelo webhook.",
+        "height": 280,
+        "width": 560,
+        "color": 7
+      },
+      "id": "f771a8d0-8639-452a-865c-5cec11be9f75",
+      "name": "Sobre",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "873ccabc-f8e3-4491-889f-24b8e90c36fc",
+      "name": "A cada 15 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "d50496db-eff0-478e-84c2-970cd06d26f1",
+      "name": "Execução sob demanda",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_reminders_claim($1::jsonb) AS result;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ limit: 50 }) ] }}"
+        }
+      },
+      "id": "d57c3900-2623-4fdb-80d8-22c56a8301b0",
+      "name": "Reivindicar lembretes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n\n// ===== lógica do nó =====\nconst res = ($json && $json.result) || {};\nconst s = res.settings || {};\nconst out = [];\nfor (const r of res.reminders || []) {\n  if (r.status !== 'sending') continue;\n  const msg = r.in_session_window ? buildReminderSession(r) : buildReminderTemplate(r);\n  out.push({ json: { to: r.patient_wa_id, phone_number_id: r.phone_number_id, clinic_id: r.clinic_id, patient_id: r.patient_id,\n    purpose: 'reminder', message: msg, graph_base: s.graph_api_base, graph_version: s.graph_api_version,\n    meta: { reminder_id: r.reminder_id, channel: r.in_session_window ? 'session' : 'template' } } });\n}\nreturn out;\n"
+      },
+      "id": "c747788a-6229-4efd-852a-b3fa348a2bbf",
+      "name": "Montar lembretes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf00EnviarWpp",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "8d8d0c1f-e2fb-493f-8ec6-a16c039d8bd5",
+      "name": "Enviar lembretes (WF00)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst out = [];\nfor (const it of $input.all()) for (const r of it.json.results || []) {\n  if (!r.meta || !r.meta.reminder_id) continue;\n  out.push({ json: { reminder_id: r.meta.reminder_id, status: r.ok ? 'sent' : 'failed', channel: r.meta.channel, wa_message_id: r.wa_message_id || null, error_code: r.error_code || null } });\n}\nreturn out;\n"
+      },
+      "id": "7a5ee8fd-8702-4502-8636-422091add842",
+      "name": "Resultados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_reminder_result($1::jsonb) AS result;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "c06ae4e7-ac78-480e-803b-49b6236cb778",
+      "name": "Registrar resultado",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "A cada 15 minutos": {
+      "main": [
+        [
+          {
+            "node": "Reivindicar lembretes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reivindicar lembretes": {
+      "main": [
+        [
+          {
+            "node": "Montar lembretes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar lembretes": {
+      "main": [
+        [
+          {
+            "node": "Enviar lembretes (WF00)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar lembretes (WF00)": {
+      "main": [
+        [
+          {
+            "node": "Resultados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resultados": {
+      "main": [
+        [
+          {
+            "node": "Registrar resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execução sob demanda": {
+      "main": [
+        [
+          {
+            "node": "Reivindicar lembretes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": false,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "RiaWf06Monitoram",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "generatedBy": "recepcionista-ia/scripts/build-workflows.mjs"
+  },
+  "tags": []
+}

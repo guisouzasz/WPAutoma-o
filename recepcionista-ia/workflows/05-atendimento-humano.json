@@ -1,0 +1,1032 @@
+{
+  "id": "RiaWf05Humano000",
+  "name": "Recepcionista IA - 05 Atendimento Humano",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 05 · Atendimento humano\nQuando a conversa vai para **HUMANO**, o robô para de responder. A equipe (números cadastrados em `ria.staff_members`) recebe o aviso no próprio WhatsApp e responde **pelo número oficial da clínica**, via comandos:\n- `#fila` — atendimentos aguardando\n- `#assumir ABCD` — assumir\n- `#ABCD texto` — responder ao paciente\n- `#devolver ABCD` — devolver ao robô\n- `#atender 55DDDNUMERO` — assumir conversa\n\nTambém há a API administrativa (Webhook com cabeçalho secreto) e devolução automática por inatividade (`human_timeout_minutes`).\nFora da janela de 24h a equipe recebe o template Utility `alerta_equipe`.",
+        "height": 360,
+        "width": 620,
+        "color": 7
+      },
+      "id": "b6f5a14a-6cee-4523-8a18-237b0db8df67",
+      "name": "Como a equipe atende",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -620
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "ff5ca31c-8c27-4d19-8967-68764789bc12",
+      "name": "Entrada",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "recepcionista/atendimento",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d1b94265-3eb3-4595-885d-3c71bd968d5e",
+      "name": "API administrativa",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        520
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RiaCredAdminApi1",
+          "name": "Recepcionista IA - API Administrativa"
+        }
+      },
+      "webhookId": "b7e4c0de-0a11-4c1a-9c55-5e7c1a0e0005"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst j = $json;\nlet action = j.action || null;\nif (!action) {\n  if (j.handoff || (j.decision && j.decision.route === 'handoff')) action = 'open';\n  else if (j.ctx && j.ctx.status === 'staff') action = 'staff_command';\n  else if (j.path === 'human') action = 'relay';\n}\nreturn { json: Object.assign({}, j, { action }) };\n"
+      },
+      "id": "4c98cd82-b362-4834-878a-b1c9fbf398b8",
+      "name": "Identificar ação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "0f471e5f-fd5d-4edb-8b04-5d54a181e206",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "open",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "open"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "dda3130a-3961-4a06-86ea-8c87eced4d9a",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "relay",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "relay"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "bc58a899-6dfd-42aa-88ba-eaf297c732c1",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "staff_command",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "staff_command"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "outro"
+        }
+      },
+      "id": "32e8d8b2-1a1f-4342-85c9-c8298b9e0bd4",
+      "name": "Ação",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_handoff_open($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({\n    clinic_id: $json.ctx.clinic.id, conversation_id: $json.ctx.conversation.id,\n    reason: ($json.handoff && $json.handoff.reason) || ($json.decision && $json.decision.params && $json.decision.params.reason) || 'patient_request',\n    priority: ($json.handoff && $json.handoff.priority) || ($json.decision && $json.decision.params && $json.decision.params.priority) || 'normal' }), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "33055929-114c-40ed-8569-262d0599fb3f",
+      "name": "Abrir atendimento humano",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        700,
+        -260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/messages.js =====\n// messages.js — textos oficiais (pt-BR) e formato normalizado de mensagens de saída.\n// Formatos: {type:'text', text} | {type:'buttons', text, buttons:[{id,title}]} |\n//           {type:'list', text, button, rows:[{id,title,description}]} |\n//           {type:'location', latitude, longitude, name, address} | {type:'template', ...}\n// Requer: util.js\n\nfunction msgText(text) { return { type: 'text', text: truncate(text, 4000) }; }\nfunction msgButtons(text, buttons) {\n  return { type: 'buttons', text: truncate(text, 1024), buttons: (buttons || []).slice(0, 3).map((b) => ({ id: String(b.id).slice(0, 256), title: truncate(b.title, 20) })) };\n}\nfunction msgList(text, button, rows) {\n  return { type: 'list', text: truncate(text, 1024), button: truncate(button, 20),\n    rows: (rows || []).slice(0, 10).map((r) => ({ id: String(r.id).slice(0, 200), title: truncate(r.title, 24), description: r.description ? truncate(r.description, 72) : undefined })) };\n}\n\nconst DEFAULT_EMERGENCY = 'Se houver sangramento intenso que não para, inchaço que dificulta respirar ou engolir, febre alta com inchaço no rosto ou trauma forte na boca ou rosto, procure agora um pronto-socorro ou ligue 192 (SAMU).';\n\nfunction clinicMsg(ctx, key, fallback) {\n  const m = (ctx.clinic && ctx.clinic.messages) || {};\n  return m[key] || fallback || '';\n}\n\nfunction menuMessage(text) {\n  return msgButtons(text || 'Como posso ajudar?', [\n    { id: 'MENU:SCHEDULE', title: 'Agendar consulta' },\n    { id: 'MENU:APPTS', title: 'Minhas consultas' },\n    { id: 'MENU:HUMAN', title: 'Falar com a equipe' },\n  ]);\n}\n\nfunction greetingMessages(ctx, aiReply) {\n  const p = ctx.patient || {};\n  const out = [];\n  const name = p.first_name ? `, ${p.first_name}` : '';\n  if (p.is_new || !p.privacy_notice_shown) {\n    out.push(msgText(clinicMsg(ctx, 'welcome', `Olá! Sou a assistente virtual da ${ctx.clinic.name}.`)));\n    const notice = clinicMsg(ctx, 'privacy_notice', '');\n    if (notice) out.push(msgText(notice));\n  } else {\n    out.push(msgText(aiReply && aiReply.length > 3 ? aiReply : `Olá${name}! Que bom falar com você novamente.`));\n  }\n  out.push(menuMessage('Como posso ajudar?'));\n  return out;\n}\n\nfunction askServiceMessage(ctx, prefix) {\n  const rows = (ctx.services || []).filter((s) => s.bookable_by_bot).map((s) => ({\n    id: 'SVC:' + s.code, title: s.name, description: s.duration_minutes ? `Cerca de ${s.duration_minutes} min` : undefined,\n  }));\n  return msgList((prefix ? prefix + '\\n\\n' : '') + 'Para qual atendimento você gostaria de agendar?', 'Ver serviços', rows);\n}\n\nfunction askNameMessage() {\n  return msgText('Para fazer o seu cadastro, qual é o seu nome completo?');\n}\n\nfunction periodLabel(p) {\n  return { morning: 'pela manhã', afternoon: 'à tarde', evening: 'à noite' }[p] || '';\n}\n\nfunction offerMessages(offer, serviceName, opts) {\n  const o = opts || {};\n  const lines = offer.options.map((x) => `${x.option_number}) ${x.label} com ${x.professional_name}`);\n  let head = o.slotTaken ? 'Que pena, esse horário acabou de ser ocupado. ' : '';\n  if (offer.alternative_dates) head += 'Não encontrei horários na data pedida, mas tenho estas opções próximas';\n  else head += 'Tenho estes horários disponíveis';\n  head += serviceName ? ` para ${serviceName}:` : ':';\n  if (offer.period_relaxed && o.period) head = `Não há horários ${periodLabel(o.period)} nesse período. ` + head;\n  const body = `${head}\\n\\n${lines.join('\\n')}\\n\\nToque no horário desejado ou responda com o número. Assim que você escolher, eu confirmo na agenda.`;\n  return [msgButtons(body, offer.options.map((x) => ({ id: 'OPT:' + x.option_id, title: x.short_label || x.label })))];\n}\n\nfunction noSlotsMessage(ctx, serviceName) {\n  return msgText(`Não encontrei horários livres para ${serviceName || 'esse atendimento'} nos próximos dias. ` +\n    `Nosso horário de funcionamento é: ${ctx.clinic.hours_summary}. Quer que eu tente outra data ou período, ou prefere falar com a equipe?`);\n}\n\nfunction bookedMessages(ctx, b) {\n  const c = ctx.clinic;\n  const out = [msgText(\n    `Pronto${ctx.patient && ctx.patient.first_name ? ', ' + ctx.patient.first_name : ''}! Sua consulta está agendada ✅\\n\\n` +\n    `📅 ${b.label}\\n🦷 ${b.service_name}\\n👩‍⚕️ ${b.professional_name}\\n📍 ${c.name} — ${c.address}` +\n    (c.maps_url ? `\\n🗺️ ${c.maps_url}` : '') +\n    `\\n\\nVocê receberá um lembrete um dia antes. Para remarcar ou cancelar, é só me escrever por aqui.` +\n    (clinicMsg(ctx, 'cancel_policy') ? `\\n\\n${clinicMsg(ctx, 'cancel_policy')}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction locationMessage(ctx) {\n  const c = ctx.clinic || {};\n  if (c.latitude === null || c.latitude === undefined || c.longitude === null || c.longitude === undefined) return null;\n  return { type: 'location', latitude: Number(c.latitude), longitude: Number(c.longitude), name: c.name, address: c.address };\n}\n\nfunction locationMessages(ctx) {\n  const c = ctx.clinic;\n  const out = [msgText(`📍 ${c.name}\\n${c.address}` + (c.maps_url ? `\\n\\nComo chegar: ${c.maps_url}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction hoursMessage(ctx) {\n  const c = ctx.clinic;\n  return msgText(`Nosso horário de funcionamento é:\\n${c.hours_summary.split('; ').join('\\n')}` +\n    (c.is_open_now ? '\\n\\nEstamos abertos agora.' : (c.next_opening_label ? `\\n\\nAbrimos novamente ${c.next_opening_label}.` : '')));\n}\n\nfunction appointmentsListText(appts) {\n  return appts.map((a, i) => `${i + 1}) ${a.label} — ${a.service_name} com ${a.professional_name}`).join('\\n');\n}\n\nfunction chooseAppointmentMessage(appts, purpose) {\n  const verb = purpose === 'cancel' ? 'cancelar' : 'remarcar';\n  const text = `Você tem estas consultas:\\n\\n${appointmentsListText(appts)}\\n\\nQual delas deseja ${verb}?`;\n  if (appts.length <= 3) return msgButtons(text, appts.map((a, i) => ({ id: 'APPT:' + a.id, title: `${i + 1}) ${a.short_label}` })));\n  return msgList(text, 'Escolher', appts.map((a, i) => ({ id: 'APPT:' + a.id, title: a.short_label, description: `${a.service_name} – ${a.professional_name}` })));\n}\n\nfunction cancelConfirmMessage(label, late, ctx) {\n  const policy = late ? `\\n\\nAtenção: ${clinicMsg(ctx, 'cancel_policy', 'o cancelamento está sendo feito com pouca antecedência.')}` : '';\n  return msgButtons(`Confirma o cancelamento da consulta de ${label}?${policy}`, [\n    { id: 'YES', title: 'Sim, cancelar' },\n    { id: 'NO', title: 'Não, manter' },\n  ]);\n}\n\nfunction serviceInfoMessages(ctx, svc) {\n  const parts = [`Sim! Fazemos ${svc.name.toLowerCase()}.`];\n  if (svc.description) parts.push(svc.description);\n  if (svc.price_info) parts.push(svc.price_info);\n  const out = [msgText(parts.join(' '))];\n  if (svc.bookable_by_bot) out.push(msgButtons('Quer que eu veja os horários disponíveis?', [{ id: 'SVC:' + svc.code, title: 'Ver horários' }, { id: 'MENU:HUMAN', title: 'Falar com a equipe' }]));\n  else out.push(msgButtons('Esse agendamento é feito pela nossa equipe. Posso chamar alguém para você?', [{ id: 'MENU:HUMAN', title: 'Sim, por favor' }]));\n  return out;\n}\n\nfunction notUnderstoodMessage(ctx, aiReply) {\n  return menuMessage((aiReply && aiReply.length > 3 ? aiReply + '\\n\\n' : 'Desculpe, não entendi muito bem. ') +\n    'Posso ajudar com agendamentos, remarcações, cancelamentos e informações da clínica.');\n}\n\nfunction technicalErrorMessage() {\n  return msgText('Desculpe, tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.');\n}\n\nfunction unsupportedMediaMessage() {\n  return msgText('Por aqui eu consigo entender mensagens de texto e áudio. Por segurança, não envie fotos, exames ou documentos. Como posso ajudar?');\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n// ===== lib/staff.js =====\n// staff.js — comandos da equipe enviados pelo WhatsApp oficial da clínica.\n//   #fila                 lista atendimentos aguardando\n//   #assumir ABCD         assume o atendimento ABCD (o robô para de responder)\n//   #ABCD texto           envia \"texto\" ao paciente do atendimento ABCD\n//   #devolver ABCD        devolve o atendimento ao robô\n//   #atender 5511999999999  assume uma conversa que estava com o robô\n//   #ajuda                mostra os comandos\n// Requer: util.js\n\nfunction parseStaffCommand(text) {\n  const raw = String(text || '').trim();\n  if (!raw.startsWith('#')) return { cmd: 'help' };\n  const m = raw.match(/^#\\s*([A-Za-zÀ-ú0-9]+)\\s*([\\s\\S]*)$/);\n  if (!m) return { cmd: 'help' };\n  const word = normalizeText(m[1]);\n  const rest = m[2].trim();\n  if (word === 'fila' || word === 'lista') return { cmd: 'list' };\n  if (word === 'ajuda' || word === 'help' || word === 'comandos') return { cmd: 'help' };\n  if (word === 'assumir' || word === 'pegar') return { cmd: 'assign', code: rest.split(/\\s+/)[0].toUpperCase() };\n  if (word === 'devolver' || word === 'encerrar' || word === 'robo') return { cmd: 'release', code: rest.split(/\\s+/)[0].toUpperCase() };\n  if (word === 'atender') return { cmd: 'takeover', patient_wa_id: rest.replace(/\\D/g, '') };\n  if (/^[a-z0-9]{4}$/.test(word)) {\n    if (!rest) return { cmd: 'help' };\n    return { cmd: 'reply', code: word.toUpperCase(), text: rest.slice(0, 4000) };\n  }\n  return { cmd: 'help' };\n}\n\nconst STAFF_HELP = 'Comandos da equipe:\\n' +\n  '#fila — atendimentos aguardando\\n' +\n  '#assumir CODIGO — assumir atendimento\\n' +\n  '#CODIGO mensagem — responder ao paciente\\n' +\n  '#devolver CODIGO — devolver ao robô\\n' +\n  '#atender 55DDDNUMERO — assumir conversa de um paciente';\n\n// Monta mensagens para a equipe respeitando a janela de 24h do WhatsApp:\n// dentro da janela => texto livre; fora => template Utility configurado (alerta_equipe).\nfunction buildStaffOutbox(staffList, text, ctx, purpose) {\n  const tpl = (ctx.clinic && ctx.clinic.staff_alert_template) || {};\n  const s = ctx.settings || {};\n  return (staffList || []).map((st) => ({\n    to: st.wa_id,\n    phone_number_id: ctx.clinic.whatsapp_phone_number_id,\n    clinic_id: ctx.clinic.id,\n    staff_id: st.id,\n    purpose: purpose || 'handoff',\n    message: st.in_window || !tpl.name ? msgText(text) : buildStaffAlertTemplate(tpl, text),\n    graph_base: s.graph_api_base,\n    graph_version: s.graph_api_version,\n  }));\n}\n\nfunction patientOutbox(ctx, patientId, waId, messages, purpose) {\n  const s = ctx.settings || {};\n  return (messages || []).map((m) => ({\n    to: waId, phone_number_id: ctx.clinic.whatsapp_phone_number_id, clinic_id: ctx.clinic.id, patient_id: patientId,\n    purpose: purpose || 'reply', message: m, graph_base: s.graph_api_base, graph_version: s.graph_api_version,\n  }));\n}\n\n\n// ===== lógica do nó =====\nconst j = $json.input; const h = $json.result || {}; const ctx = j.ctx; const ev = j.ev || {};\nconst hp = j.handoff || (j.decision && j.decision.params) || {};\nconst reasonPt = { patient_request: 'pediu para falar com a equipe', urgency: 'possível urgência odontológica', emergency: 'POSSÍVEL EMERGÊNCIA',\n  complaint: 'reclamação', out_of_scope: 'pergunta fora da base de conhecimento', booking_problem: 'problema no agendamento',\n  technical_failure: 'falha técnica', policy: 'regra da clínica exige atendimento humano', staff_takeover: 'equipe assumiu' };\nconst msgs = [];\nconst emergency = hp.emergency || h.reason === 'emergency';\nif (emergency) msgs.push(msgText('⚠️ ' + clinicMsg(ctx, 'emergency', DEFAULT_EMERGENCY)));\nconst intro = {\n  emergency: 'Também já avisei a nossa equipe com prioridade máxima.',\n  urgency: 'Sinto muito pelo desconforto. Eu não consigo avaliar sintomas por aqui, mas já avisei a nossa equipe com prioridade para te orientar e verificar um encaixe.',\n  patient_request: 'Certo! Vou te transferir para a nossa equipe, que vai continuar o atendimento por aqui mesmo.',\n  complaint: 'Sinto muito por isso. Encaminhei agora para a nossa equipe, que vai te responder pessoalmente.',\n  out_of_scope: 'Não tenho essa informação confirmada aqui. Encaminhei sua pergunta para a nossa equipe responder por aqui.',\n  booking_problem: 'Tive um problema para concluir o agendamento. Já passei para a nossa equipe finalizar com você por aqui.',\n  technical_failure: 'Tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.',\n  policy: 'Esse pedido precisa ser tratado pela nossa equipe. Já encaminhei para alguém te responder por aqui.',\n  staff_takeover: '',\n}[h.reason] ?? 'Vou te transferir para a nossa equipe.';\nlet txt = intro;\nif (h.status === 'ok' && !h.is_open_now && !emergency && txt) {\n  txt += ' ' + clinicMsg(ctx, 'human_out_of_hours', 'Nossa equipe responde no horário de funcionamento.') + (h.next_opening_label ? ' Próximo atendimento: ' + h.next_opening_label + '.' : '');\n}\nif (h.reason === 'urgency') txt += '\\n\\nSe houver sangramento intenso, inchaço que dificulte respirar ou engolir, ou febre alta com inchaço no rosto, procure um pronto-socorro ou ligue 192.';\nif (txt) msgs.push(msgText(txt));\nlet outbox = [];\nif (h.status === 'ok') {\n  const prio = { urgent: '🔴 URGENTE', high: '🟠 Prioridade alta', normal: '🟢 Normal' }[h.priority] || '';\n  const last = ev.text ? truncate(ev.text, 500) : (ev.type === 'audio' ? '(áudio não transcrito)' : '');\n  const staffText = '🔔 Atendimento #' + h.code + ' — ' + prio + '\\nPaciente: ' + h.patient_name + ' (' + h.patient_phone_masked + ')\\nMotivo: ' + (reasonPt[h.reason] || h.reason) +\n    (last ? '\\nMensagem: \"' + last + '\"' : '') + '\\n\\nResponder: #' + h.code + ' sua mensagem\\nAssumir: #assumir ' + h.code + '\\nDevolver ao robô: #devolver ' + h.code;\n  outbox = buildStaffOutbox(h.staff, staffText, ctx, 'handoff');\n}\nreturn { json: Object.assign({}, j, { handoff_result: { code: h.code, status: h.status }, staff_outbox: outbox,\n  result: { messages: msgs, state: 'idle', context: {} } }) };\n"
+      },
+      "id": "d23c46ab-4b29-410d-85a4-04c548cea66b",
+      "name": "Mensagens da transferência",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst out = [];\nfor (const it of $input.all()) for (const m of it.json.staff_outbox || []) out.push({ json: m });\nreturn out.length ? out : [{ json: { __empty: true } }];\n"
+      },
+      "id": "7da37cd4-d0a0-4728-8aeb-aa37f0b37e7b",
+      "name": "Itens para a equipe (abertura)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b7464fe-6604-4bb6-8c9d-261bc1efdac9",
+              "leftValue": "={{ !$json.__empty }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7144cad3-1109-4009-8d04-7269455364f3",
+      "name": "Há avisos? (abertura)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1360,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf00EnviarWpp",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "f2f3dfda-bf6e-4c6c-8eda-e80768ee5762",
+      "name": "Avisar equipe (WF00)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1580,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nreturn $('Mensagens da transferência').all().map((i) => {\n  const j = Object.assign({}, i.json); delete j.staff_outbox; delete j.handoff; return { json: j };\n});\n"
+      },
+      "id": "bf52440b-b5ed-4a32-87d6-5337c5994d8d",
+      "name": "Retorno (abertura)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_handoff_relay_targets($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ clinic_id: $json.ctx.clinic.id, conversation_id: $json.ctx.conversation.id }), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "bcf435e5-3d37-4a7c-80b1-d2647b8a061d",
+      "name": "Destinatários do repasse",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        700,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/messages.js =====\n// messages.js — textos oficiais (pt-BR) e formato normalizado de mensagens de saída.\n// Formatos: {type:'text', text} | {type:'buttons', text, buttons:[{id,title}]} |\n//           {type:'list', text, button, rows:[{id,title,description}]} |\n//           {type:'location', latitude, longitude, name, address} | {type:'template', ...}\n// Requer: util.js\n\nfunction msgText(text) { return { type: 'text', text: truncate(text, 4000) }; }\nfunction msgButtons(text, buttons) {\n  return { type: 'buttons', text: truncate(text, 1024), buttons: (buttons || []).slice(0, 3).map((b) => ({ id: String(b.id).slice(0, 256), title: truncate(b.title, 20) })) };\n}\nfunction msgList(text, button, rows) {\n  return { type: 'list', text: truncate(text, 1024), button: truncate(button, 20),\n    rows: (rows || []).slice(0, 10).map((r) => ({ id: String(r.id).slice(0, 200), title: truncate(r.title, 24), description: r.description ? truncate(r.description, 72) : undefined })) };\n}\n\nconst DEFAULT_EMERGENCY = 'Se houver sangramento intenso que não para, inchaço que dificulta respirar ou engolir, febre alta com inchaço no rosto ou trauma forte na boca ou rosto, procure agora um pronto-socorro ou ligue 192 (SAMU).';\n\nfunction clinicMsg(ctx, key, fallback) {\n  const m = (ctx.clinic && ctx.clinic.messages) || {};\n  return m[key] || fallback || '';\n}\n\nfunction menuMessage(text) {\n  return msgButtons(text || 'Como posso ajudar?', [\n    { id: 'MENU:SCHEDULE', title: 'Agendar consulta' },\n    { id: 'MENU:APPTS', title: 'Minhas consultas' },\n    { id: 'MENU:HUMAN', title: 'Falar com a equipe' },\n  ]);\n}\n\nfunction greetingMessages(ctx, aiReply) {\n  const p = ctx.patient || {};\n  const out = [];\n  const name = p.first_name ? `, ${p.first_name}` : '';\n  if (p.is_new || !p.privacy_notice_shown) {\n    out.push(msgText(clinicMsg(ctx, 'welcome', `Olá! Sou a assistente virtual da ${ctx.clinic.name}.`)));\n    const notice = clinicMsg(ctx, 'privacy_notice', '');\n    if (notice) out.push(msgText(notice));\n  } else {\n    out.push(msgText(aiReply && aiReply.length > 3 ? aiReply : `Olá${name}! Que bom falar com você novamente.`));\n  }\n  out.push(menuMessage('Como posso ajudar?'));\n  return out;\n}\n\nfunction askServiceMessage(ctx, prefix) {\n  const rows = (ctx.services || []).filter((s) => s.bookable_by_bot).map((s) => ({\n    id: 'SVC:' + s.code, title: s.name, description: s.duration_minutes ? `Cerca de ${s.duration_minutes} min` : undefined,\n  }));\n  return msgList((prefix ? prefix + '\\n\\n' : '') + 'Para qual atendimento você gostaria de agendar?', 'Ver serviços', rows);\n}\n\nfunction askNameMessage() {\n  return msgText('Para fazer o seu cadastro, qual é o seu nome completo?');\n}\n\nfunction periodLabel(p) {\n  return { morning: 'pela manhã', afternoon: 'à tarde', evening: 'à noite' }[p] || '';\n}\n\nfunction offerMessages(offer, serviceName, opts) {\n  const o = opts || {};\n  const lines = offer.options.map((x) => `${x.option_number}) ${x.label} com ${x.professional_name}`);\n  let head = o.slotTaken ? 'Que pena, esse horário acabou de ser ocupado. ' : '';\n  if (offer.alternative_dates) head += 'Não encontrei horários na data pedida, mas tenho estas opções próximas';\n  else head += 'Tenho estes horários disponíveis';\n  head += serviceName ? ` para ${serviceName}:` : ':';\n  if (offer.period_relaxed && o.period) head = `Não há horários ${periodLabel(o.period)} nesse período. ` + head;\n  const body = `${head}\\n\\n${lines.join('\\n')}\\n\\nToque no horário desejado ou responda com o número. Assim que você escolher, eu confirmo na agenda.`;\n  return [msgButtons(body, offer.options.map((x) => ({ id: 'OPT:' + x.option_id, title: x.short_label || x.label })))];\n}\n\nfunction noSlotsMessage(ctx, serviceName) {\n  return msgText(`Não encontrei horários livres para ${serviceName || 'esse atendimento'} nos próximos dias. ` +\n    `Nosso horário de funcionamento é: ${ctx.clinic.hours_summary}. Quer que eu tente outra data ou período, ou prefere falar com a equipe?`);\n}\n\nfunction bookedMessages(ctx, b) {\n  const c = ctx.clinic;\n  const out = [msgText(\n    `Pronto${ctx.patient && ctx.patient.first_name ? ', ' + ctx.patient.first_name : ''}! Sua consulta está agendada ✅\\n\\n` +\n    `📅 ${b.label}\\n🦷 ${b.service_name}\\n👩‍⚕️ ${b.professional_name}\\n📍 ${c.name} — ${c.address}` +\n    (c.maps_url ? `\\n🗺️ ${c.maps_url}` : '') +\n    `\\n\\nVocê receberá um lembrete um dia antes. Para remarcar ou cancelar, é só me escrever por aqui.` +\n    (clinicMsg(ctx, 'cancel_policy') ? `\\n\\n${clinicMsg(ctx, 'cancel_policy')}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction locationMessage(ctx) {\n  const c = ctx.clinic || {};\n  if (c.latitude === null || c.latitude === undefined || c.longitude === null || c.longitude === undefined) return null;\n  return { type: 'location', latitude: Number(c.latitude), longitude: Number(c.longitude), name: c.name, address: c.address };\n}\n\nfunction locationMessages(ctx) {\n  const c = ctx.clinic;\n  const out = [msgText(`📍 ${c.name}\\n${c.address}` + (c.maps_url ? `\\n\\nComo chegar: ${c.maps_url}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction hoursMessage(ctx) {\n  const c = ctx.clinic;\n  return msgText(`Nosso horário de funcionamento é:\\n${c.hours_summary.split('; ').join('\\n')}` +\n    (c.is_open_now ? '\\n\\nEstamos abertos agora.' : (c.next_opening_label ? `\\n\\nAbrimos novamente ${c.next_opening_label}.` : '')));\n}\n\nfunction appointmentsListText(appts) {\n  return appts.map((a, i) => `${i + 1}) ${a.label} — ${a.service_name} com ${a.professional_name}`).join('\\n');\n}\n\nfunction chooseAppointmentMessage(appts, purpose) {\n  const verb = purpose === 'cancel' ? 'cancelar' : 'remarcar';\n  const text = `Você tem estas consultas:\\n\\n${appointmentsListText(appts)}\\n\\nQual delas deseja ${verb}?`;\n  if (appts.length <= 3) return msgButtons(text, appts.map((a, i) => ({ id: 'APPT:' + a.id, title: `${i + 1}) ${a.short_label}` })));\n  return msgList(text, 'Escolher', appts.map((a, i) => ({ id: 'APPT:' + a.id, title: a.short_label, description: `${a.service_name} – ${a.professional_name}` })));\n}\n\nfunction cancelConfirmMessage(label, late, ctx) {\n  const policy = late ? `\\n\\nAtenção: ${clinicMsg(ctx, 'cancel_policy', 'o cancelamento está sendo feito com pouca antecedência.')}` : '';\n  return msgButtons(`Confirma o cancelamento da consulta de ${label}?${policy}`, [\n    { id: 'YES', title: 'Sim, cancelar' },\n    { id: 'NO', title: 'Não, manter' },\n  ]);\n}\n\nfunction serviceInfoMessages(ctx, svc) {\n  const parts = [`Sim! Fazemos ${svc.name.toLowerCase()}.`];\n  if (svc.description) parts.push(svc.description);\n  if (svc.price_info) parts.push(svc.price_info);\n  const out = [msgText(parts.join(' '))];\n  if (svc.bookable_by_bot) out.push(msgButtons('Quer que eu veja os horários disponíveis?', [{ id: 'SVC:' + svc.code, title: 'Ver horários' }, { id: 'MENU:HUMAN', title: 'Falar com a equipe' }]));\n  else out.push(msgButtons('Esse agendamento é feito pela nossa equipe. Posso chamar alguém para você?', [{ id: 'MENU:HUMAN', title: 'Sim, por favor' }]));\n  return out;\n}\n\nfunction notUnderstoodMessage(ctx, aiReply) {\n  return menuMessage((aiReply && aiReply.length > 3 ? aiReply + '\\n\\n' : 'Desculpe, não entendi muito bem. ') +\n    'Posso ajudar com agendamentos, remarcações, cancelamentos e informações da clínica.');\n}\n\nfunction technicalErrorMessage() {\n  return msgText('Desculpe, tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.');\n}\n\nfunction unsupportedMediaMessage() {\n  return msgText('Por aqui eu consigo entender mensagens de texto e áudio. Por segurança, não envie fotos, exames ou documentos. Como posso ajudar?');\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n// ===== lib/staff.js =====\n// staff.js — comandos da equipe enviados pelo WhatsApp oficial da clínica.\n//   #fila                 lista atendimentos aguardando\n//   #assumir ABCD         assume o atendimento ABCD (o robô para de responder)\n//   #ABCD texto           envia \"texto\" ao paciente do atendimento ABCD\n//   #devolver ABCD        devolve o atendimento ao robô\n//   #atender 5511999999999  assume uma conversa que estava com o robô\n//   #ajuda                mostra os comandos\n// Requer: util.js\n\nfunction parseStaffCommand(text) {\n  const raw = String(text || '').trim();\n  if (!raw.startsWith('#')) return { cmd: 'help' };\n  const m = raw.match(/^#\\s*([A-Za-zÀ-ú0-9]+)\\s*([\\s\\S]*)$/);\n  if (!m) return { cmd: 'help' };\n  const word = normalizeText(m[1]);\n  const rest = m[2].trim();\n  if (word === 'fila' || word === 'lista') return { cmd: 'list' };\n  if (word === 'ajuda' || word === 'help' || word === 'comandos') return { cmd: 'help' };\n  if (word === 'assumir' || word === 'pegar') return { cmd: 'assign', code: rest.split(/\\s+/)[0].toUpperCase() };\n  if (word === 'devolver' || word === 'encerrar' || word === 'robo') return { cmd: 'release', code: rest.split(/\\s+/)[0].toUpperCase() };\n  if (word === 'atender') return { cmd: 'takeover', patient_wa_id: rest.replace(/\\D/g, '') };\n  if (/^[a-z0-9]{4}$/.test(word)) {\n    if (!rest) return { cmd: 'help' };\n    return { cmd: 'reply', code: word.toUpperCase(), text: rest.slice(0, 4000) };\n  }\n  return { cmd: 'help' };\n}\n\nconst STAFF_HELP = 'Comandos da equipe:\\n' +\n  '#fila — atendimentos aguardando\\n' +\n  '#assumir CODIGO — assumir atendimento\\n' +\n  '#CODIGO mensagem — responder ao paciente\\n' +\n  '#devolver CODIGO — devolver ao robô\\n' +\n  '#atender 55DDDNUMERO — assumir conversa de um paciente';\n\n// Monta mensagens para a equipe respeitando a janela de 24h do WhatsApp:\n// dentro da janela => texto livre; fora => template Utility configurado (alerta_equipe).\nfunction buildStaffOutbox(staffList, text, ctx, purpose) {\n  const tpl = (ctx.clinic && ctx.clinic.staff_alert_template) || {};\n  const s = ctx.settings || {};\n  return (staffList || []).map((st) => ({\n    to: st.wa_id,\n    phone_number_id: ctx.clinic.whatsapp_phone_number_id,\n    clinic_id: ctx.clinic.id,\n    staff_id: st.id,\n    purpose: purpose || 'handoff',\n    message: st.in_window || !tpl.name ? msgText(text) : buildStaffAlertTemplate(tpl, text),\n    graph_base: s.graph_api_base,\n    graph_version: s.graph_api_version,\n  }));\n}\n\nfunction patientOutbox(ctx, patientId, waId, messages, purpose) {\n  const s = ctx.settings || {};\n  return (messages || []).map((m) => ({\n    to: waId, phone_number_id: ctx.clinic.whatsapp_phone_number_id, clinic_id: ctx.clinic.id, patient_id: patientId,\n    purpose: purpose || 'reply', message: m, graph_base: s.graph_api_base, graph_version: s.graph_api_version,\n  }));\n}\n\n\n// ===== lógica do nó =====\nconst j = $json.input; const t = $json.result || {}; const ev = j.ev || {}; const ctx = j.ctx;\nconst name = (ctx.patient && (ctx.patient.full_name || ctx.patient.profile_name)) || 'Paciente';\nlet body;\nif (ev.type === 'text' || ev.type === 'interactive' || ev.type === 'button') body = truncate(ev.text || '', 1500);\nelse if (ev.type === 'audio') body = '(enviou um áudio — peça para escrever ou ligue para o paciente)';\nelse body = '(enviou um arquivo do tipo ' + ev.type + ', que não é repassado por segurança)';\nconst outbox = t.code ? buildStaffOutbox(t.staff || [], '💬 [#' + t.code + '] ' + name + ': ' + body + '\\n\\nResponder: #' + t.code + ' sua mensagem', ctx, 'staff_relay') : [];\nreturn { json: Object.assign({}, j, { staff_outbox: outbox, result: { messages: [], state: null, context: null } }) };\n"
+      },
+      "id": "23edb5af-0dd2-4932-86cf-82922b1af21b",
+      "name": "Repassar mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst out = [];\nfor (const it of $input.all()) for (const m of it.json.staff_outbox || []) out.push({ json: m });\nreturn out.length ? out : [{ json: { __empty: true } }];\n"
+      },
+      "id": "57fa962d-cd2e-4c8e-81ce-dfaf714f8025",
+      "name": "Itens para a equipe (repasse)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "29be6d35-044e-48d9-8022-6cba39f0997e",
+              "leftValue": "={{ !$json.__empty }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "529181f4-8445-4b93-8878-2f62154b90b6",
+      "name": "Há avisos? (repasse)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1360,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf00EnviarWpp",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "fe90395b-643a-4602-8e87-b283187f8623",
+      "name": "Repassar à equipe (WF00)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1580,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nreturn $('Repassar mensagem').all().map((i) => { const j = Object.assign({}, i.json); delete j.staff_outbox; return { json: j }; });\n"
+      },
+      "id": "e2fff760-fdde-450a-8e65-7e09ece0a024",
+      "name": "Retorno (repasse)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/messages.js =====\n// messages.js — textos oficiais (pt-BR) e formato normalizado de mensagens de saída.\n// Formatos: {type:'text', text} | {type:'buttons', text, buttons:[{id,title}]} |\n//           {type:'list', text, button, rows:[{id,title,description}]} |\n//           {type:'location', latitude, longitude, name, address} | {type:'template', ...}\n// Requer: util.js\n\nfunction msgText(text) { return { type: 'text', text: truncate(text, 4000) }; }\nfunction msgButtons(text, buttons) {\n  return { type: 'buttons', text: truncate(text, 1024), buttons: (buttons || []).slice(0, 3).map((b) => ({ id: String(b.id).slice(0, 256), title: truncate(b.title, 20) })) };\n}\nfunction msgList(text, button, rows) {\n  return { type: 'list', text: truncate(text, 1024), button: truncate(button, 20),\n    rows: (rows || []).slice(0, 10).map((r) => ({ id: String(r.id).slice(0, 200), title: truncate(r.title, 24), description: r.description ? truncate(r.description, 72) : undefined })) };\n}\n\nconst DEFAULT_EMERGENCY = 'Se houver sangramento intenso que não para, inchaço que dificulta respirar ou engolir, febre alta com inchaço no rosto ou trauma forte na boca ou rosto, procure agora um pronto-socorro ou ligue 192 (SAMU).';\n\nfunction clinicMsg(ctx, key, fallback) {\n  const m = (ctx.clinic && ctx.clinic.messages) || {};\n  return m[key] || fallback || '';\n}\n\nfunction menuMessage(text) {\n  return msgButtons(text || 'Como posso ajudar?', [\n    { id: 'MENU:SCHEDULE', title: 'Agendar consulta' },\n    { id: 'MENU:APPTS', title: 'Minhas consultas' },\n    { id: 'MENU:HUMAN', title: 'Falar com a equipe' },\n  ]);\n}\n\nfunction greetingMessages(ctx, aiReply) {\n  const p = ctx.patient || {};\n  const out = [];\n  const name = p.first_name ? `, ${p.first_name}` : '';\n  if (p.is_new || !p.privacy_notice_shown) {\n    out.push(msgText(clinicMsg(ctx, 'welcome', `Olá! Sou a assistente virtual da ${ctx.clinic.name}.`)));\n    const notice = clinicMsg(ctx, 'privacy_notice', '');\n    if (notice) out.push(msgText(notice));\n  } else {\n    out.push(msgText(aiReply && aiReply.length > 3 ? aiReply : `Olá${name}! Que bom falar com você novamente.`));\n  }\n  out.push(menuMessage('Como posso ajudar?'));\n  return out;\n}\n\nfunction askServiceMessage(ctx, prefix) {\n  const rows = (ctx.services || []).filter((s) => s.bookable_by_bot).map((s) => ({\n    id: 'SVC:' + s.code, title: s.name, description: s.duration_minutes ? `Cerca de ${s.duration_minutes} min` : undefined,\n  }));\n  return msgList((prefix ? prefix + '\\n\\n' : '') + 'Para qual atendimento você gostaria de agendar?', 'Ver serviços', rows);\n}\n\nfunction askNameMessage() {\n  return msgText('Para fazer o seu cadastro, qual é o seu nome completo?');\n}\n\nfunction periodLabel(p) {\n  return { morning: 'pela manhã', afternoon: 'à tarde', evening: 'à noite' }[p] || '';\n}\n\nfunction offerMessages(offer, serviceName, opts) {\n  const o = opts || {};\n  const lines = offer.options.map((x) => `${x.option_number}) ${x.label} com ${x.professional_name}`);\n  let head = o.slotTaken ? 'Que pena, esse horário acabou de ser ocupado. ' : '';\n  if (offer.alternative_dates) head += 'Não encontrei horários na data pedida, mas tenho estas opções próximas';\n  else head += 'Tenho estes horários disponíveis';\n  head += serviceName ? ` para ${serviceName}:` : ':';\n  if (offer.period_relaxed && o.period) head = `Não há horários ${periodLabel(o.period)} nesse período. ` + head;\n  const body = `${head}\\n\\n${lines.join('\\n')}\\n\\nToque no horário desejado ou responda com o número. Assim que você escolher, eu confirmo na agenda.`;\n  return [msgButtons(body, offer.options.map((x) => ({ id: 'OPT:' + x.option_id, title: x.short_label || x.label })))];\n}\n\nfunction noSlotsMessage(ctx, serviceName) {\n  return msgText(`Não encontrei horários livres para ${serviceName || 'esse atendimento'} nos próximos dias. ` +\n    `Nosso horário de funcionamento é: ${ctx.clinic.hours_summary}. Quer que eu tente outra data ou período, ou prefere falar com a equipe?`);\n}\n\nfunction bookedMessages(ctx, b) {\n  const c = ctx.clinic;\n  const out = [msgText(\n    `Pronto${ctx.patient && ctx.patient.first_name ? ', ' + ctx.patient.first_name : ''}! Sua consulta está agendada ✅\\n\\n` +\n    `📅 ${b.label}\\n🦷 ${b.service_name}\\n👩‍⚕️ ${b.professional_name}\\n📍 ${c.name} — ${c.address}` +\n    (c.maps_url ? `\\n🗺️ ${c.maps_url}` : '') +\n    `\\n\\nVocê receberá um lembrete um dia antes. Para remarcar ou cancelar, é só me escrever por aqui.` +\n    (clinicMsg(ctx, 'cancel_policy') ? `\\n\\n${clinicMsg(ctx, 'cancel_policy')}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction locationMessage(ctx) {\n  const c = ctx.clinic || {};\n  if (c.latitude === null || c.latitude === undefined || c.longitude === null || c.longitude === undefined) return null;\n  return { type: 'location', latitude: Number(c.latitude), longitude: Number(c.longitude), name: c.name, address: c.address };\n}\n\nfunction locationMessages(ctx) {\n  const c = ctx.clinic;\n  const out = [msgText(`📍 ${c.name}\\n${c.address}` + (c.maps_url ? `\\n\\nComo chegar: ${c.maps_url}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction hoursMessage(ctx) {\n  const c = ctx.clinic;\n  return msgText(`Nosso horário de funcionamento é:\\n${c.hours_summary.split('; ').join('\\n')}` +\n    (c.is_open_now ? '\\n\\nEstamos abertos agora.' : (c.next_opening_label ? `\\n\\nAbrimos novamente ${c.next_opening_label}.` : '')));\n}\n\nfunction appointmentsListText(appts) {\n  return appts.map((a, i) => `${i + 1}) ${a.label} — ${a.service_name} com ${a.professional_name}`).join('\\n');\n}\n\nfunction chooseAppointmentMessage(appts, purpose) {\n  const verb = purpose === 'cancel' ? 'cancelar' : 'remarcar';\n  const text = `Você tem estas consultas:\\n\\n${appointmentsListText(appts)}\\n\\nQual delas deseja ${verb}?`;\n  if (appts.length <= 3) return msgButtons(text, appts.map((a, i) => ({ id: 'APPT:' + a.id, title: `${i + 1}) ${a.short_label}` })));\n  return msgList(text, 'Escolher', appts.map((a, i) => ({ id: 'APPT:' + a.id, title: a.short_label, description: `${a.service_name} – ${a.professional_name}` })));\n}\n\nfunction cancelConfirmMessage(label, late, ctx) {\n  const policy = late ? `\\n\\nAtenção: ${clinicMsg(ctx, 'cancel_policy', 'o cancelamento está sendo feito com pouca antecedência.')}` : '';\n  return msgButtons(`Confirma o cancelamento da consulta de ${label}?${policy}`, [\n    { id: 'YES', title: 'Sim, cancelar' },\n    { id: 'NO', title: 'Não, manter' },\n  ]);\n}\n\nfunction serviceInfoMessages(ctx, svc) {\n  const parts = [`Sim! Fazemos ${svc.name.toLowerCase()}.`];\n  if (svc.description) parts.push(svc.description);\n  if (svc.price_info) parts.push(svc.price_info);\n  const out = [msgText(parts.join(' '))];\n  if (svc.bookable_by_bot) out.push(msgButtons('Quer que eu veja os horários disponíveis?', [{ id: 'SVC:' + svc.code, title: 'Ver horários' }, { id: 'MENU:HUMAN', title: 'Falar com a equipe' }]));\n  else out.push(msgButtons('Esse agendamento é feito pela nossa equipe. Posso chamar alguém para você?', [{ id: 'MENU:HUMAN', title: 'Sim, por favor' }]));\n  return out;\n}\n\nfunction notUnderstoodMessage(ctx, aiReply) {\n  return menuMessage((aiReply && aiReply.length > 3 ? aiReply + '\\n\\n' : 'Desculpe, não entendi muito bem. ') +\n    'Posso ajudar com agendamentos, remarcações, cancelamentos e informações da clínica.');\n}\n\nfunction technicalErrorMessage() {\n  return msgText('Desculpe, tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.');\n}\n\nfunction unsupportedMediaMessage() {\n  return msgText('Por aqui eu consigo entender mensagens de texto e áudio. Por segurança, não envie fotos, exames ou documentos. Como posso ajudar?');\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n// ===== lib/staff.js =====\n// staff.js — comandos da equipe enviados pelo WhatsApp oficial da clínica.\n//   #fila                 lista atendimentos aguardando\n//   #assumir ABCD         assume o atendimento ABCD (o robô para de responder)\n//   #ABCD texto           envia \"texto\" ao paciente do atendimento ABCD\n//   #devolver ABCD        devolve o atendimento ao robô\n//   #atender 5511999999999  assume uma conversa que estava com o robô\n//   #ajuda                mostra os comandos\n// Requer: util.js\n\nfunction parseStaffCommand(text) {\n  const raw = String(text || '').trim();\n  if (!raw.startsWith('#')) return { cmd: 'help' };\n  const m = raw.match(/^#\\s*([A-Za-zÀ-ú0-9]+)\\s*([\\s\\S]*)$/);\n  if (!m) return { cmd: 'help' };\n  const word = normalizeText(m[1]);\n  const rest = m[2].trim();\n  if (word === 'fila' || word === 'lista') return { cmd: 'list' };\n  if (word === 'ajuda' || word === 'help' || word === 'comandos') return { cmd: 'help' };\n  if (word === 'assumir' || word === 'pegar') return { cmd: 'assign', code: rest.split(/\\s+/)[0].toUpperCase() };\n  if (word === 'devolver' || word === 'encerrar' || word === 'robo') return { cmd: 'release', code: rest.split(/\\s+/)[0].toUpperCase() };\n  if (word === 'atender') return { cmd: 'takeover', patient_wa_id: rest.replace(/\\D/g, '') };\n  if (/^[a-z0-9]{4}$/.test(word)) {\n    if (!rest) return { cmd: 'help' };\n    return { cmd: 'reply', code: word.toUpperCase(), text: rest.slice(0, 4000) };\n  }\n  return { cmd: 'help' };\n}\n\nconst STAFF_HELP = 'Comandos da equipe:\\n' +\n  '#fila — atendimentos aguardando\\n' +\n  '#assumir CODIGO — assumir atendimento\\n' +\n  '#CODIGO mensagem — responder ao paciente\\n' +\n  '#devolver CODIGO — devolver ao robô\\n' +\n  '#atender 55DDDNUMERO — assumir conversa de um paciente';\n\n// Monta mensagens para a equipe respeitando a janela de 24h do WhatsApp:\n// dentro da janela => texto livre; fora => template Utility configurado (alerta_equipe).\nfunction buildStaffOutbox(staffList, text, ctx, purpose) {\n  const tpl = (ctx.clinic && ctx.clinic.staff_alert_template) || {};\n  const s = ctx.settings || {};\n  return (staffList || []).map((st) => ({\n    to: st.wa_id,\n    phone_number_id: ctx.clinic.whatsapp_phone_number_id,\n    clinic_id: ctx.clinic.id,\n    staff_id: st.id,\n    purpose: purpose || 'handoff',\n    message: st.in_window || !tpl.name ? msgText(text) : buildStaffAlertTemplate(tpl, text),\n    graph_base: s.graph_api_base,\n    graph_version: s.graph_api_version,\n  }));\n}\n\nfunction patientOutbox(ctx, patientId, waId, messages, purpose) {\n  const s = ctx.settings || {};\n  return (messages || []).map((m) => ({\n    to: waId, phone_number_id: ctx.clinic.whatsapp_phone_number_id, clinic_id: ctx.clinic.id, patient_id: patientId,\n    purpose: purpose || 'reply', message: m, graph_base: s.graph_api_base, graph_version: s.graph_api_version,\n  }));\n}\n\n\n// ===== lógica do nó =====\nconst j = $json; const ev = j.ev || {}; const ctx = j.ctx;\nconst cmd = (ev.type === 'text') ? parseStaffCommand(ev.text) : { cmd: 'help' };\nconst map = { list: 'list', assign: 'assign', release: 'release', reply: 'reply', takeover: 'takeover' };\nreturn { json: Object.assign({}, j, { cmd, valid: !!map[cmd.cmd],\n  args: { clinic_id: ctx.clinic.id, staff_id: ctx.staff.id, action: map[cmd.cmd] || 'list', code: cmd.code || null, patient_wa_id: cmd.patient_wa_id || null } }) };\n"
+      },
+      "id": "fba53017-3eba-4264-8d32-b29db4d6bc2d",
+      "name": "Interpretar comando",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "634b8511-4c2d-4103-8498-e3c2018ed333",
+              "leftValue": "={{ $json.valid === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e5076687-8b17-4e80-806d-bd66d8bdd657",
+      "name": "Comando válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        920,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_handoff_action($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.args), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "7f9691cc-4aa2-4558-8097-1ab367c8cf84",
+      "name": "Executar comando",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1140,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/messages.js =====\n// messages.js — textos oficiais (pt-BR) e formato normalizado de mensagens de saída.\n// Formatos: {type:'text', text} | {type:'buttons', text, buttons:[{id,title}]} |\n//           {type:'list', text, button, rows:[{id,title,description}]} |\n//           {type:'location', latitude, longitude, name, address} | {type:'template', ...}\n// Requer: util.js\n\nfunction msgText(text) { return { type: 'text', text: truncate(text, 4000) }; }\nfunction msgButtons(text, buttons) {\n  return { type: 'buttons', text: truncate(text, 1024), buttons: (buttons || []).slice(0, 3).map((b) => ({ id: String(b.id).slice(0, 256), title: truncate(b.title, 20) })) };\n}\nfunction msgList(text, button, rows) {\n  return { type: 'list', text: truncate(text, 1024), button: truncate(button, 20),\n    rows: (rows || []).slice(0, 10).map((r) => ({ id: String(r.id).slice(0, 200), title: truncate(r.title, 24), description: r.description ? truncate(r.description, 72) : undefined })) };\n}\n\nconst DEFAULT_EMERGENCY = 'Se houver sangramento intenso que não para, inchaço que dificulta respirar ou engolir, febre alta com inchaço no rosto ou trauma forte na boca ou rosto, procure agora um pronto-socorro ou ligue 192 (SAMU).';\n\nfunction clinicMsg(ctx, key, fallback) {\n  const m = (ctx.clinic && ctx.clinic.messages) || {};\n  return m[key] || fallback || '';\n}\n\nfunction menuMessage(text) {\n  return msgButtons(text || 'Como posso ajudar?', [\n    { id: 'MENU:SCHEDULE', title: 'Agendar consulta' },\n    { id: 'MENU:APPTS', title: 'Minhas consultas' },\n    { id: 'MENU:HUMAN', title: 'Falar com a equipe' },\n  ]);\n}\n\nfunction greetingMessages(ctx, aiReply) {\n  const p = ctx.patient || {};\n  const out = [];\n  const name = p.first_name ? `, ${p.first_name}` : '';\n  if (p.is_new || !p.privacy_notice_shown) {\n    out.push(msgText(clinicMsg(ctx, 'welcome', `Olá! Sou a assistente virtual da ${ctx.clinic.name}.`)));\n    const notice = clinicMsg(ctx, 'privacy_notice', '');\n    if (notice) out.push(msgText(notice));\n  } else {\n    out.push(msgText(aiReply && aiReply.length > 3 ? aiReply : `Olá${name}! Que bom falar com você novamente.`));\n  }\n  out.push(menuMessage('Como posso ajudar?'));\n  return out;\n}\n\nfunction askServiceMessage(ctx, prefix) {\n  const rows = (ctx.services || []).filter((s) => s.bookable_by_bot).map((s) => ({\n    id: 'SVC:' + s.code, title: s.name, description: s.duration_minutes ? `Cerca de ${s.duration_minutes} min` : undefined,\n  }));\n  return msgList((prefix ? prefix + '\\n\\n' : '') + 'Para qual atendimento você gostaria de agendar?', 'Ver serviços', rows);\n}\n\nfunction askNameMessage() {\n  return msgText('Para fazer o seu cadastro, qual é o seu nome completo?');\n}\n\nfunction periodLabel(p) {\n  return { morning: 'pela manhã', afternoon: 'à tarde', evening: 'à noite' }[p] || '';\n}\n\nfunction offerMessages(offer, serviceName, opts) {\n  const o = opts || {};\n  const lines = offer.options.map((x) => `${x.option_number}) ${x.label} com ${x.professional_name}`);\n  let head = o.slotTaken ? 'Que pena, esse horário acabou de ser ocupado. ' : '';\n  if (offer.alternative_dates) head += 'Não encontrei horários na data pedida, mas tenho estas opções próximas';\n  else head += 'Tenho estes horários disponíveis';\n  head += serviceName ? ` para ${serviceName}:` : ':';\n  if (offer.period_relaxed && o.period) head = `Não há horários ${periodLabel(o.period)} nesse período. ` + head;\n  const body = `${head}\\n\\n${lines.join('\\n')}\\n\\nToque no horário desejado ou responda com o número. Assim que você escolher, eu confirmo na agenda.`;\n  return [msgButtons(body, offer.options.map((x) => ({ id: 'OPT:' + x.option_id, title: x.short_label || x.label })))];\n}\n\nfunction noSlotsMessage(ctx, serviceName) {\n  return msgText(`Não encontrei horários livres para ${serviceName || 'esse atendimento'} nos próximos dias. ` +\n    `Nosso horário de funcionamento é: ${ctx.clinic.hours_summary}. Quer que eu tente outra data ou período, ou prefere falar com a equipe?`);\n}\n\nfunction bookedMessages(ctx, b) {\n  const c = ctx.clinic;\n  const out = [msgText(\n    `Pronto${ctx.patient && ctx.patient.first_name ? ', ' + ctx.patient.first_name : ''}! Sua consulta está agendada ✅\\n\\n` +\n    `📅 ${b.label}\\n🦷 ${b.service_name}\\n👩‍⚕️ ${b.professional_name}\\n📍 ${c.name} — ${c.address}` +\n    (c.maps_url ? `\\n🗺️ ${c.maps_url}` : '') +\n    `\\n\\nVocê receberá um lembrete um dia antes. Para remarcar ou cancelar, é só me escrever por aqui.` +\n    (clinicMsg(ctx, 'cancel_policy') ? `\\n\\n${clinicMsg(ctx, 'cancel_policy')}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction locationMessage(ctx) {\n  const c = ctx.clinic || {};\n  if (c.latitude === null || c.latitude === undefined || c.longitude === null || c.longitude === undefined) return null;\n  return { type: 'location', latitude: Number(c.latitude), longitude: Number(c.longitude), name: c.name, address: c.address };\n}\n\nfunction locationMessages(ctx) {\n  const c = ctx.clinic;\n  const out = [msgText(`📍 ${c.name}\\n${c.address}` + (c.maps_url ? `\\n\\nComo chegar: ${c.maps_url}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction hoursMessage(ctx) {\n  const c = ctx.clinic;\n  return msgText(`Nosso horário de funcionamento é:\\n${c.hours_summary.split('; ').join('\\n')}` +\n    (c.is_open_now ? '\\n\\nEstamos abertos agora.' : (c.next_opening_label ? `\\n\\nAbrimos novamente ${c.next_opening_label}.` : '')));\n}\n\nfunction appointmentsListText(appts) {\n  return appts.map((a, i) => `${i + 1}) ${a.label} — ${a.service_name} com ${a.professional_name}`).join('\\n');\n}\n\nfunction chooseAppointmentMessage(appts, purpose) {\n  const verb = purpose === 'cancel' ? 'cancelar' : 'remarcar';\n  const text = `Você tem estas consultas:\\n\\n${appointmentsListText(appts)}\\n\\nQual delas deseja ${verb}?`;\n  if (appts.length <= 3) return msgButtons(text, appts.map((a, i) => ({ id: 'APPT:' + a.id, title: `${i + 1}) ${a.short_label}` })));\n  return msgList(text, 'Escolher', appts.map((a, i) => ({ id: 'APPT:' + a.id, title: a.short_label, description: `${a.service_name} – ${a.professional_name}` })));\n}\n\nfunction cancelConfirmMessage(label, late, ctx) {\n  const policy = late ? `\\n\\nAtenção: ${clinicMsg(ctx, 'cancel_policy', 'o cancelamento está sendo feito com pouca antecedência.')}` : '';\n  return msgButtons(`Confirma o cancelamento da consulta de ${label}?${policy}`, [\n    { id: 'YES', title: 'Sim, cancelar' },\n    { id: 'NO', title: 'Não, manter' },\n  ]);\n}\n\nfunction serviceInfoMessages(ctx, svc) {\n  const parts = [`Sim! Fazemos ${svc.name.toLowerCase()}.`];\n  if (svc.description) parts.push(svc.description);\n  if (svc.price_info) parts.push(svc.price_info);\n  const out = [msgText(parts.join(' '))];\n  if (svc.bookable_by_bot) out.push(msgButtons('Quer que eu veja os horários disponíveis?', [{ id: 'SVC:' + svc.code, title: 'Ver horários' }, { id: 'MENU:HUMAN', title: 'Falar com a equipe' }]));\n  else out.push(msgButtons('Esse agendamento é feito pela nossa equipe. Posso chamar alguém para você?', [{ id: 'MENU:HUMAN', title: 'Sim, por favor' }]));\n  return out;\n}\n\nfunction notUnderstoodMessage(ctx, aiReply) {\n  return menuMessage((aiReply && aiReply.length > 3 ? aiReply + '\\n\\n' : 'Desculpe, não entendi muito bem. ') +\n    'Posso ajudar com agendamentos, remarcações, cancelamentos e informações da clínica.');\n}\n\nfunction technicalErrorMessage() {\n  return msgText('Desculpe, tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.');\n}\n\nfunction unsupportedMediaMessage() {\n  return msgText('Por aqui eu consigo entender mensagens de texto e áudio. Por segurança, não envie fotos, exames ou documentos. Como posso ajudar?');\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n// ===== lib/staff.js =====\n// staff.js — comandos da equipe enviados pelo WhatsApp oficial da clínica.\n//   #fila                 lista atendimentos aguardando\n//   #assumir ABCD         assume o atendimento ABCD (o robô para de responder)\n//   #ABCD texto           envia \"texto\" ao paciente do atendimento ABCD\n//   #devolver ABCD        devolve o atendimento ao robô\n//   #atender 5511999999999  assume uma conversa que estava com o robô\n//   #ajuda                mostra os comandos\n// Requer: util.js\n\nfunction parseStaffCommand(text) {\n  const raw = String(text || '').trim();\n  if (!raw.startsWith('#')) return { cmd: 'help' };\n  const m = raw.match(/^#\\s*([A-Za-zÀ-ú0-9]+)\\s*([\\s\\S]*)$/);\n  if (!m) return { cmd: 'help' };\n  const word = normalizeText(m[1]);\n  const rest = m[2].trim();\n  if (word === 'fila' || word === 'lista') return { cmd: 'list' };\n  if (word === 'ajuda' || word === 'help' || word === 'comandos') return { cmd: 'help' };\n  if (word === 'assumir' || word === 'pegar') return { cmd: 'assign', code: rest.split(/\\s+/)[0].toUpperCase() };\n  if (word === 'devolver' || word === 'encerrar' || word === 'robo') return { cmd: 'release', code: rest.split(/\\s+/)[0].toUpperCase() };\n  if (word === 'atender') return { cmd: 'takeover', patient_wa_id: rest.replace(/\\D/g, '') };\n  if (/^[a-z0-9]{4}$/.test(word)) {\n    if (!rest) return { cmd: 'help' };\n    return { cmd: 'reply', code: word.toUpperCase(), text: rest.slice(0, 4000) };\n  }\n  return { cmd: 'help' };\n}\n\nconst STAFF_HELP = 'Comandos da equipe:\\n' +\n  '#fila — atendimentos aguardando\\n' +\n  '#assumir CODIGO — assumir atendimento\\n' +\n  '#CODIGO mensagem — responder ao paciente\\n' +\n  '#devolver CODIGO — devolver ao robô\\n' +\n  '#atender 55DDDNUMERO — assumir conversa de um paciente';\n\n// Monta mensagens para a equipe respeitando a janela de 24h do WhatsApp:\n// dentro da janela => texto livre; fora => template Utility configurado (alerta_equipe).\nfunction buildStaffOutbox(staffList, text, ctx, purpose) {\n  const tpl = (ctx.clinic && ctx.clinic.staff_alert_template) || {};\n  const s = ctx.settings || {};\n  return (staffList || []).map((st) => ({\n    to: st.wa_id,\n    phone_number_id: ctx.clinic.whatsapp_phone_number_id,\n    clinic_id: ctx.clinic.id,\n    staff_id: st.id,\n    purpose: purpose || 'handoff',\n    message: st.in_window || !tpl.name ? msgText(text) : buildStaffAlertTemplate(tpl, text),\n    graph_base: s.graph_api_base,\n    graph_version: s.graph_api_version,\n  }));\n}\n\nfunction patientOutbox(ctx, patientId, waId, messages, purpose) {\n  const s = ctx.settings || {};\n  return (messages || []).map((m) => ({\n    to: waId, phone_number_id: ctx.clinic.whatsapp_phone_number_id, clinic_id: ctx.clinic.id, patient_id: patientId,\n    purpose: purpose || 'reply', message: m, graph_base: s.graph_api_base, graph_version: s.graph_api_version,\n  }));\n}\n\n\n// ===== lógica do nó =====\nconst j = $json.input; const r = $json.result || {}; const ctx = j.ctx; const cmd = j.cmd;\nconst staff = [{ id: ctx.staff.id, wa_id: ctx.staff.wa_id, name: ctx.staff.name, in_window: true }];\nconst toStaff = (text) => buildStaffOutbox(staff, text, ctx, 'staff_relay');\nlet outbox = [];\nif (r.status === 'forbidden') outbox = toStaff('Seu número não tem permissão para esta ação.');\nelse if (r.status === 'not_found') outbox = toStaff('Atendimento ' + (cmd.code ? '#' + cmd.code + ' ' : '') + 'não encontrado ou já encerrado. Envie #fila para ver os abertos.');\nelse if (cmd.cmd === 'list') {\n  const hs = r.handoffs || [];\n  outbox = toStaff(hs.length ? 'Atendimentos abertos:\\n' + hs.map((h) => '#' + h.code + ' — ' + h.patient_name + ' (' + h.priority + ', ' + h.opened_at + (h.assigned_to ? ', com ' + h.assigned_to : '') + ')').join('\\n') : 'Nenhum atendimento aguardando. 🎉');\n} else if (r.status === 'ok') {\n  const pOut = (texts) => r.patient_in_window ? patientOutbox(ctx, r.patient_id, r.patient_wa_id, texts.map(msgText), 'staff_relay') : [];\n  const windowNote = r.patient_in_window ? '' : '\\n⚠️ O paciente está fora da janela de 24h do WhatsApp: mensagens livres não serão entregues. Ligue para o paciente ou aguarde ele escrever.';\n  if (cmd.cmd === 'assign') outbox = toStaff('Você assumiu o atendimento #' + r.code + ' (' + r.patient_name + '). Responda com: #' + r.code + ' sua mensagem' + windowNote)\n    .concat(pOut(['Olá! Aqui é ' + (ctx.staff.name || 'a equipe') + ', da ' + ctx.clinic.name + '. Vou continuar o seu atendimento por aqui.']));\n  else if (cmd.cmd === 'reply') outbox = pOut([cmd.text]).concat(r.patient_in_window ? [] : toStaff('Mensagem NÃO enviada para #' + r.code + '.' + windowNote));\n  else if (cmd.cmd === 'release') outbox = toStaff('Atendimento #' + r.code + ' devolvido ao robô.')\n    .concat(pOut(['Obrigado pela conversa! Se precisar de algo mais, a assistente virtual da clínica continua à disposição por aqui.']));\n  else if (cmd.cmd === 'takeover') outbox = toStaff('Você assumiu a conversa com ' + r.patient_name + ' (#' + r.code + '). Responda com: #' + r.code + ' sua mensagem' + windowNote);\n}\nreturn { json: Object.assign({}, j, { staff_outbox: outbox, action: 'staff_command' }) };\n"
+      },
+      "id": "5b9e25ff-8d2f-44f9-80af-da4de79d193f",
+      "name": "Resposta do comando",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/messages.js =====\n// messages.js — textos oficiais (pt-BR) e formato normalizado de mensagens de saída.\n// Formatos: {type:'text', text} | {type:'buttons', text, buttons:[{id,title}]} |\n//           {type:'list', text, button, rows:[{id,title,description}]} |\n//           {type:'location', latitude, longitude, name, address} | {type:'template', ...}\n// Requer: util.js\n\nfunction msgText(text) { return { type: 'text', text: truncate(text, 4000) }; }\nfunction msgButtons(text, buttons) {\n  return { type: 'buttons', text: truncate(text, 1024), buttons: (buttons || []).slice(0, 3).map((b) => ({ id: String(b.id).slice(0, 256), title: truncate(b.title, 20) })) };\n}\nfunction msgList(text, button, rows) {\n  return { type: 'list', text: truncate(text, 1024), button: truncate(button, 20),\n    rows: (rows || []).slice(0, 10).map((r) => ({ id: String(r.id).slice(0, 200), title: truncate(r.title, 24), description: r.description ? truncate(r.description, 72) : undefined })) };\n}\n\nconst DEFAULT_EMERGENCY = 'Se houver sangramento intenso que não para, inchaço que dificulta respirar ou engolir, febre alta com inchaço no rosto ou trauma forte na boca ou rosto, procure agora um pronto-socorro ou ligue 192 (SAMU).';\n\nfunction clinicMsg(ctx, key, fallback) {\n  const m = (ctx.clinic && ctx.clinic.messages) || {};\n  return m[key] || fallback || '';\n}\n\nfunction menuMessage(text) {\n  return msgButtons(text || 'Como posso ajudar?', [\n    { id: 'MENU:SCHEDULE', title: 'Agendar consulta' },\n    { id: 'MENU:APPTS', title: 'Minhas consultas' },\n    { id: 'MENU:HUMAN', title: 'Falar com a equipe' },\n  ]);\n}\n\nfunction greetingMessages(ctx, aiReply) {\n  const p = ctx.patient || {};\n  const out = [];\n  const name = p.first_name ? `, ${p.first_name}` : '';\n  if (p.is_new || !p.privacy_notice_shown) {\n    out.push(msgText(clinicMsg(ctx, 'welcome', `Olá! Sou a assistente virtual da ${ctx.clinic.name}.`)));\n    const notice = clinicMsg(ctx, 'privacy_notice', '');\n    if (notice) out.push(msgText(notice));\n  } else {\n    out.push(msgText(aiReply && aiReply.length > 3 ? aiReply : `Olá${name}! Que bom falar com você novamente.`));\n  }\n  out.push(menuMessage('Como posso ajudar?'));\n  return out;\n}\n\nfunction askServiceMessage(ctx, prefix) {\n  const rows = (ctx.services || []).filter((s) => s.bookable_by_bot).map((s) => ({\n    id: 'SVC:' + s.code, title: s.name, description: s.duration_minutes ? `Cerca de ${s.duration_minutes} min` : undefined,\n  }));\n  return msgList((prefix ? prefix + '\\n\\n' : '') + 'Para qual atendimento você gostaria de agendar?', 'Ver serviços', rows);\n}\n\nfunction askNameMessage() {\n  return msgText('Para fazer o seu cadastro, qual é o seu nome completo?');\n}\n\nfunction periodLabel(p) {\n  return { morning: 'pela manhã', afternoon: 'à tarde', evening: 'à noite' }[p] || '';\n}\n\nfunction offerMessages(offer, serviceName, opts) {\n  const o = opts || {};\n  const lines = offer.options.map((x) => `${x.option_number}) ${x.label} com ${x.professional_name}`);\n  let head = o.slotTaken ? 'Que pena, esse horário acabou de ser ocupado. ' : '';\n  if (offer.alternative_dates) head += 'Não encontrei horários na data pedida, mas tenho estas opções próximas';\n  else head += 'Tenho estes horários disponíveis';\n  head += serviceName ? ` para ${serviceName}:` : ':';\n  if (offer.period_relaxed && o.period) head = `Não há horários ${periodLabel(o.period)} nesse período. ` + head;\n  const body = `${head}\\n\\n${lines.join('\\n')}\\n\\nToque no horário desejado ou responda com o número. Assim que você escolher, eu confirmo na agenda.`;\n  return [msgButtons(body, offer.options.map((x) => ({ id: 'OPT:' + x.option_id, title: x.short_label || x.label })))];\n}\n\nfunction noSlotsMessage(ctx, serviceName) {\n  return msgText(`Não encontrei horários livres para ${serviceName || 'esse atendimento'} nos próximos dias. ` +\n    `Nosso horário de funcionamento é: ${ctx.clinic.hours_summary}. Quer que eu tente outra data ou período, ou prefere falar com a equipe?`);\n}\n\nfunction bookedMessages(ctx, b) {\n  const c = ctx.clinic;\n  const out = [msgText(\n    `Pronto${ctx.patient && ctx.patient.first_name ? ', ' + ctx.patient.first_name : ''}! Sua consulta está agendada ✅\\n\\n` +\n    `📅 ${b.label}\\n🦷 ${b.service_name}\\n👩‍⚕️ ${b.professional_name}\\n📍 ${c.name} — ${c.address}` +\n    (c.maps_url ? `\\n🗺️ ${c.maps_url}` : '') +\n    `\\n\\nVocê receberá um lembrete um dia antes. Para remarcar ou cancelar, é só me escrever por aqui.` +\n    (clinicMsg(ctx, 'cancel_policy') ? `\\n\\n${clinicMsg(ctx, 'cancel_policy')}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction locationMessage(ctx) {\n  const c = ctx.clinic || {};\n  if (c.latitude === null || c.latitude === undefined || c.longitude === null || c.longitude === undefined) return null;\n  return { type: 'location', latitude: Number(c.latitude), longitude: Number(c.longitude), name: c.name, address: c.address };\n}\n\nfunction locationMessages(ctx) {\n  const c = ctx.clinic;\n  const out = [msgText(`📍 ${c.name}\\n${c.address}` + (c.maps_url ? `\\n\\nComo chegar: ${c.maps_url}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction hoursMessage(ctx) {\n  const c = ctx.clinic;\n  return msgText(`Nosso horário de funcionamento é:\\n${c.hours_summary.split('; ').join('\\n')}` +\n    (c.is_open_now ? '\\n\\nEstamos abertos agora.' : (c.next_opening_label ? `\\n\\nAbrimos novamente ${c.next_opening_label}.` : '')));\n}\n\nfunction appointmentsListText(appts) {\n  return appts.map((a, i) => `${i + 1}) ${a.label} — ${a.service_name} com ${a.professional_name}`).join('\\n');\n}\n\nfunction chooseAppointmentMessage(appts, purpose) {\n  const verb = purpose === 'cancel' ? 'cancelar' : 'remarcar';\n  const text = `Você tem estas consultas:\\n\\n${appointmentsListText(appts)}\\n\\nQual delas deseja ${verb}?`;\n  if (appts.length <= 3) return msgButtons(text, appts.map((a, i) => ({ id: 'APPT:' + a.id, title: `${i + 1}) ${a.short_label}` })));\n  return msgList(text, 'Escolher', appts.map((a, i) => ({ id: 'APPT:' + a.id, title: a.short_label, description: `${a.service_name} – ${a.professional_name}` })));\n}\n\nfunction cancelConfirmMessage(label, late, ctx) {\n  const policy = late ? `\\n\\nAtenção: ${clinicMsg(ctx, 'cancel_policy', 'o cancelamento está sendo feito com pouca antecedência.')}` : '';\n  return msgButtons(`Confirma o cancelamento da consulta de ${label}?${policy}`, [\n    { id: 'YES', title: 'Sim, cancelar' },\n    { id: 'NO', title: 'Não, manter' },\n  ]);\n}\n\nfunction serviceInfoMessages(ctx, svc) {\n  const parts = [`Sim! Fazemos ${svc.name.toLowerCase()}.`];\n  if (svc.description) parts.push(svc.description);\n  if (svc.price_info) parts.push(svc.price_info);\n  const out = [msgText(parts.join(' '))];\n  if (svc.bookable_by_bot) out.push(msgButtons('Quer que eu veja os horários disponíveis?', [{ id: 'SVC:' + svc.code, title: 'Ver horários' }, { id: 'MENU:HUMAN', title: 'Falar com a equipe' }]));\n  else out.push(msgButtons('Esse agendamento é feito pela nossa equipe. Posso chamar alguém para você?', [{ id: 'MENU:HUMAN', title: 'Sim, por favor' }]));\n  return out;\n}\n\nfunction notUnderstoodMessage(ctx, aiReply) {\n  return menuMessage((aiReply && aiReply.length > 3 ? aiReply + '\\n\\n' : 'Desculpe, não entendi muito bem. ') +\n    'Posso ajudar com agendamentos, remarcações, cancelamentos e informações da clínica.');\n}\n\nfunction technicalErrorMessage() {\n  return msgText('Desculpe, tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.');\n}\n\nfunction unsupportedMediaMessage() {\n  return msgText('Por aqui eu consigo entender mensagens de texto e áudio. Por segurança, não envie fotos, exames ou documentos. Como posso ajudar?');\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n// ===== lib/staff.js =====\n// staff.js — comandos da equipe enviados pelo WhatsApp oficial da clínica.\n//   #fila                 lista atendimentos aguardando\n//   #assumir ABCD         assume o atendimento ABCD (o robô para de responder)\n//   #ABCD texto           envia \"texto\" ao paciente do atendimento ABCD\n//   #devolver ABCD        devolve o atendimento ao robô\n//   #atender 5511999999999  assume uma conversa que estava com o robô\n//   #ajuda                mostra os comandos\n// Requer: util.js\n\nfunction parseStaffCommand(text) {\n  const raw = String(text || '').trim();\n  if (!raw.startsWith('#')) return { cmd: 'help' };\n  const m = raw.match(/^#\\s*([A-Za-zÀ-ú0-9]+)\\s*([\\s\\S]*)$/);\n  if (!m) return { cmd: 'help' };\n  const word = normalizeText(m[1]);\n  const rest = m[2].trim();\n  if (word === 'fila' || word === 'lista') return { cmd: 'list' };\n  if (word === 'ajuda' || word === 'help' || word === 'comandos') return { cmd: 'help' };\n  if (word === 'assumir' || word === 'pegar') return { cmd: 'assign', code: rest.split(/\\s+/)[0].toUpperCase() };\n  if (word === 'devolver' || word === 'encerrar' || word === 'robo') return { cmd: 'release', code: rest.split(/\\s+/)[0].toUpperCase() };\n  if (word === 'atender') return { cmd: 'takeover', patient_wa_id: rest.replace(/\\D/g, '') };\n  if (/^[a-z0-9]{4}$/.test(word)) {\n    if (!rest) return { cmd: 'help' };\n    return { cmd: 'reply', code: word.toUpperCase(), text: rest.slice(0, 4000) };\n  }\n  return { cmd: 'help' };\n}\n\nconst STAFF_HELP = 'Comandos da equipe:\\n' +\n  '#fila — atendimentos aguardando\\n' +\n  '#assumir CODIGO — assumir atendimento\\n' +\n  '#CODIGO mensagem — responder ao paciente\\n' +\n  '#devolver CODIGO — devolver ao robô\\n' +\n  '#atender 55DDDNUMERO — assumir conversa de um paciente';\n\n// Monta mensagens para a equipe respeitando a janela de 24h do WhatsApp:\n// dentro da janela => texto livre; fora => template Utility configurado (alerta_equipe).\nfunction buildStaffOutbox(staffList, text, ctx, purpose) {\n  const tpl = (ctx.clinic && ctx.clinic.staff_alert_template) || {};\n  const s = ctx.settings || {};\n  return (staffList || []).map((st) => ({\n    to: st.wa_id,\n    phone_number_id: ctx.clinic.whatsapp_phone_number_id,\n    clinic_id: ctx.clinic.id,\n    staff_id: st.id,\n    purpose: purpose || 'handoff',\n    message: st.in_window || !tpl.name ? msgText(text) : buildStaffAlertTemplate(tpl, text),\n    graph_base: s.graph_api_base,\n    graph_version: s.graph_api_version,\n  }));\n}\n\nfunction patientOutbox(ctx, patientId, waId, messages, purpose) {\n  const s = ctx.settings || {};\n  return (messages || []).map((m) => ({\n    to: waId, phone_number_id: ctx.clinic.whatsapp_phone_number_id, clinic_id: ctx.clinic.id, patient_id: patientId,\n    purpose: purpose || 'reply', message: m, graph_base: s.graph_api_base, graph_version: s.graph_api_version,\n  }));\n}\n\n\n// ===== lógica do nó =====\nconst j = $json; const ctx = j.ctx;\nconst staff = [{ id: ctx.staff.id, wa_id: ctx.staff.wa_id, name: ctx.staff.name, in_window: true }];\nreturn { json: Object.assign({}, j, { staff_outbox: buildStaffOutbox(staff, STAFF_HELP, ctx, 'staff_relay'), action: 'staff_command' }) };\n"
+      },
+      "id": "7f0b4cfa-ecfb-420e-8d96-e67517c75d74",
+      "name": "Ajuda da equipe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst out = [];\nfor (const it of $input.all()) for (const m of it.json.staff_outbox || []) out.push({ json: m });\nreturn out.length ? out : [{ json: { __empty: true } }];\n"
+      },
+      "id": "d7af95b6-1120-45c4-8e32-e39498ae281c",
+      "name": "Itens para envio (comando)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1580,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "242867be-52e5-486a-85a3-ed6cf5ccb994",
+              "leftValue": "={{ !$json.__empty }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "141059e5-4919-4663-8d83-725aa476f342",
+      "name": "Há mensagens? (comando)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1800,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf00EnviarWpp",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "f3704588-2978-465d-80b3-6908d3f404a1",
+      "name": "Enviar respostas (WF00)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2020,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst src = $('Interpretar comando').all();\nreturn src.map((i) => ({ json: { ev: i.json.ev, ctx: { status: 'staff', clinic: { id: i.json.ctx.clinic.id } }, action: 'staff_command' } }));\n"
+      },
+      "id": "6302cfb3-a98d-48a5-8966-620a3b70319d",
+      "name": "Retorno (comando)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst b = ($json.body && typeof $json.body === 'object') ? $json.body : {};\nconst uuid = /^[0-9a-f-]{36}$/i;\nconst actions = ['list', 'assign', 'release', 'takeover'];\nconst ok = uuid.test(b.clinic_id || '') && actions.includes(b.action) && (b.action === 'list' || b.action === 'takeover' || /^[A-Za-z0-9]{4}$/.test(b.code || ''));\nreturn { json: { ok, args: ok ? { clinic_id: b.clinic_id, action: b.action, code: b.code || null, staff_id: uuid.test(b.staff_id || '') ? b.staff_id : null,\n  patient_wa_id: b.patient_wa_id ? String(b.patient_wa_id).replace(/\\D/g, '') : null, via: 'admin_api' } : null } };\n"
+      },
+      "id": "bd3fa77e-1fc9-4357-8309-a78938e3be77",
+      "name": "Validar requisição",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "44f532d9-bf47-458d-8580-d08210185c25",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "00799bdb-cd46-41a7-8dec-7a9c3233e768",
+      "name": "Requisição válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_handoff_action($1::jsonb) AS result;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.args) ] }}"
+        }
+      },
+      "id": "e2d84190-b8ed-4473-8d13-f91f92ded0b1",
+      "name": "Ação administrativa",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        460
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.result) }}",
+        "options": {}
+      },
+      "id": "e0b57658-d001-4e94-81f1-b828d54656f7",
+      "name": "Responder",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: \"invalid_request\" }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "98cdd944-6ca4-433f-8c20-026197cfa40d",
+      "name": "Responder erro",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        600
+      ]
+    }
+  ],
+  "connections": {
+    "Entrada": {
+      "main": [
+        [
+          {
+            "node": "Identificar ação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identificar ação": {
+      "main": [
+        [
+          {
+            "node": "Ação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ação": {
+      "main": [
+        [
+          {
+            "node": "Abrir atendimento humano",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Destinatários do repasse",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Interpretar comando",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Abrir atendimento humano": {
+      "main": [
+        [
+          {
+            "node": "Mensagens da transferência",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagens da transferência": {
+      "main": [
+        [
+          {
+            "node": "Itens para a equipe (abertura)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Itens para a equipe (abertura)": {
+      "main": [
+        [
+          {
+            "node": "Há avisos? (abertura)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Há avisos? (abertura)": {
+      "main": [
+        [
+          {
+            "node": "Avisar equipe (WF00)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retorno (abertura)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar equipe (WF00)": {
+      "main": [
+        [
+          {
+            "node": "Retorno (abertura)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Destinatários do repasse": {
+      "main": [
+        [
+          {
+            "node": "Repassar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repassar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Itens para a equipe (repasse)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Itens para a equipe (repasse)": {
+      "main": [
+        [
+          {
+            "node": "Há avisos? (repasse)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Há avisos? (repasse)": {
+      "main": [
+        [
+          {
+            "node": "Repassar à equipe (WF00)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retorno (repasse)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Repassar à equipe (WF00)": {
+      "main": [
+        [
+          {
+            "node": "Retorno (repasse)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar comando": {
+      "main": [
+        [
+          {
+            "node": "Comando válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comando válido?": {
+      "main": [
+        [
+          {
+            "node": "Executar comando",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ajuda da equipe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar comando": {
+      "main": [
+        [
+          {
+            "node": "Resposta do comando",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resposta do comando": {
+      "main": [
+        [
+          {
+            "node": "Itens para envio (comando)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ajuda da equipe": {
+      "main": [
+        [
+          {
+            "node": "Itens para envio (comando)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Itens para envio (comando)": {
+      "main": [
+        [
+          {
+            "node": "Há mensagens? (comando)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Há mensagens? (comando)": {
+      "main": [
+        [
+          {
+            "node": "Enviar respostas (WF00)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retorno (comando)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar respostas (WF00)": {
+      "main": [
+        [
+          {
+            "node": "Retorno (comando)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API administrativa": {
+      "main": [
+        [
+          {
+            "node": "Validar requisição",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar requisição": {
+      "main": [
+        [
+          {
+            "node": "Requisição válida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Requisição válida?": {
+      "main": [
+        [
+          {
+            "node": "Ação administrativa",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ação administrativa": {
+      "main": [
+        [
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": false,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "RiaWf06Monitoram"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "generatedBy": "recepcionista-ia/scripts/build-workflows.mjs"
+  },
+  "tags": []
+}

@@ -1,0 +1,42 @@
+# Proxy reverso com HTTPS automático (Let's Encrypt).
+# - /webhook/* fica público (Meta precisa alcançar o WhatsApp Trigger; a API administrativa exige cabeçalho secreto).
+# - /webhook-test/* e o editor do n8n ficam restritos aos IPs em ADMIN_ALLOWED_IPS.
+{
+	email {$ACME_EMAIL}
+}
+
+{$N8N_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	request_body {
+		max_size 5MB
+	}
+
+	@webhooks path /webhook/*
+	handle @webhooks {
+		reverse_proxy n8n:5678
+	}
+
+	@restrito not remote_ip {$ADMIN_ALLOWED_IPS}
+	handle @restrito {
+		respond "Acesso restrito" 403
+	}
+
+	handle {
+		reverse_proxy n8n:5678
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

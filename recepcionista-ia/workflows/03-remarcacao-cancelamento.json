@@ -1,0 +1,1022 @@
+{
+  "id": "RiaWf03Remarcaca",
+  "name": "Recepcionista IA - 03 Remarcação e Cancelamento",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 03 · Remarcação e cancelamento\n- Lista somente consultas do próprio paciente.\n- **Cancelar:** verifica política → pede confirmação explícita (Sim/Não) → `cancel_requested` → remove da agenda → `cancelled`. Falha na agenda ⇒ reverte e transfere para humano.\n- **Remarcar:** verifica política → oferece horários (WF02) mantendo a consulta original até a nova estar confirmada.\n- **Confirmar presença:** botão do lembrete.",
+        "height": 260,
+        "width": 600,
+        "color": 7
+      },
+      "id": "1fe01fa5-63c3-444e-8550-5540b05f2809",
+      "name": "Sobre",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -460
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "27bc7f78-2439-46d4-826a-202b25a024e3",
+      "name": "Entrada",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_patient_appointments($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ clinic_id: $json.ctx.clinic.id, patient_id: $json.ctx.patient.id }), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "ff00d83d-15ad-435b-86e9-9b0031982898",
+      "name": "Consultas do paciente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/messages.js =====\n// messages.js — textos oficiais (pt-BR) e formato normalizado de mensagens de saída.\n// Formatos: {type:'text', text} | {type:'buttons', text, buttons:[{id,title}]} |\n//           {type:'list', text, button, rows:[{id,title,description}]} |\n//           {type:'location', latitude, longitude, name, address} | {type:'template', ...}\n// Requer: util.js\n\nfunction msgText(text) { return { type: 'text', text: truncate(text, 4000) }; }\nfunction msgButtons(text, buttons) {\n  return { type: 'buttons', text: truncate(text, 1024), buttons: (buttons || []).slice(0, 3).map((b) => ({ id: String(b.id).slice(0, 256), title: truncate(b.title, 20) })) };\n}\nfunction msgList(text, button, rows) {\n  return { type: 'list', text: truncate(text, 1024), button: truncate(button, 20),\n    rows: (rows || []).slice(0, 10).map((r) => ({ id: String(r.id).slice(0, 200), title: truncate(r.title, 24), description: r.description ? truncate(r.description, 72) : undefined })) };\n}\n\nconst DEFAULT_EMERGENCY = 'Se houver sangramento intenso que não para, inchaço que dificulta respirar ou engolir, febre alta com inchaço no rosto ou trauma forte na boca ou rosto, procure agora um pronto-socorro ou ligue 192 (SAMU).';\n\nfunction clinicMsg(ctx, key, fallback) {\n  const m = (ctx.clinic && ctx.clinic.messages) || {};\n  return m[key] || fallback || '';\n}\n\nfunction menuMessage(text) {\n  return msgButtons(text || 'Como posso ajudar?', [\n    { id: 'MENU:SCHEDULE', title: 'Agendar consulta' },\n    { id: 'MENU:APPTS', title: 'Minhas consultas' },\n    { id: 'MENU:HUMAN', title: 'Falar com a equipe' },\n  ]);\n}\n\nfunction greetingMessages(ctx, aiReply) {\n  const p = ctx.patient || {};\n  const out = [];\n  const name = p.first_name ? `, ${p.first_name}` : '';\n  if (p.is_new || !p.privacy_notice_shown) {\n    out.push(msgText(clinicMsg(ctx, 'welcome', `Olá! Sou a assistente virtual da ${ctx.clinic.name}.`)));\n    const notice = clinicMsg(ctx, 'privacy_notice', '');\n    if (notice) out.push(msgText(notice));\n  } else {\n    out.push(msgText(aiReply && aiReply.length > 3 ? aiReply : `Olá${name}! Que bom falar com você novamente.`));\n  }\n  out.push(menuMessage('Como posso ajudar?'));\n  return out;\n}\n\nfunction askServiceMessage(ctx, prefix) {\n  const rows = (ctx.services || []).filter((s) => s.bookable_by_bot).map((s) => ({\n    id: 'SVC:' + s.code, title: s.name, description: s.duration_minutes ? `Cerca de ${s.duration_minutes} min` : undefined,\n  }));\n  return msgList((prefix ? prefix + '\\n\\n' : '') + 'Para qual atendimento você gostaria de agendar?', 'Ver serviços', rows);\n}\n\nfunction askNameMessage() {\n  return msgText('Para fazer o seu cadastro, qual é o seu nome completo?');\n}\n\nfunction periodLabel(p) {\n  return { morning: 'pela manhã', afternoon: 'à tarde', evening: 'à noite' }[p] || '';\n}\n\nfunction offerMessages(offer, serviceName, opts) {\n  const o = opts || {};\n  const lines = offer.options.map((x) => `${x.option_number}) ${x.label} com ${x.professional_name}`);\n  let head = o.slotTaken ? 'Que pena, esse horário acabou de ser ocupado. ' : '';\n  if (offer.alternative_dates) head += 'Não encontrei horários na data pedida, mas tenho estas opções próximas';\n  else head += 'Tenho estes horários disponíveis';\n  head += serviceName ? ` para ${serviceName}:` : ':';\n  if (offer.period_relaxed && o.period) head = `Não há horários ${periodLabel(o.period)} nesse período. ` + head;\n  const body = `${head}\\n\\n${lines.join('\\n')}\\n\\nToque no horário desejado ou responda com o número. Assim que você escolher, eu confirmo na agenda.`;\n  return [msgButtons(body, offer.options.map((x) => ({ id: 'OPT:' + x.option_id, title: x.short_label || x.label })))];\n}\n\nfunction noSlotsMessage(ctx, serviceName) {\n  return msgText(`Não encontrei horários livres para ${serviceName || 'esse atendimento'} nos próximos dias. ` +\n    `Nosso horário de funcionamento é: ${ctx.clinic.hours_summary}. Quer que eu tente outra data ou período, ou prefere falar com a equipe?`);\n}\n\nfunction bookedMessages(ctx, b) {\n  const c = ctx.clinic;\n  const out = [msgText(\n    `Pronto${ctx.patient && ctx.patient.first_name ? ', ' + ctx.patient.first_name : ''}! Sua consulta está agendada ✅\\n\\n` +\n    `📅 ${b.label}\\n🦷 ${b.service_name}\\n👩‍⚕️ ${b.professional_name}\\n📍 ${c.name} — ${c.address}` +\n    (c.maps_url ? `\\n🗺️ ${c.maps_url}` : '') +\n    `\\n\\nVocê receberá um lembrete um dia antes. Para remarcar ou cancelar, é só me escrever por aqui.` +\n    (clinicMsg(ctx, 'cancel_policy') ? `\\n\\n${clinicMsg(ctx, 'cancel_policy')}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction locationMessage(ctx) {\n  const c = ctx.clinic || {};\n  if (c.latitude === null || c.latitude === undefined || c.longitude === null || c.longitude === undefined) return null;\n  return { type: 'location', latitude: Number(c.latitude), longitude: Number(c.longitude), name: c.name, address: c.address };\n}\n\nfunction locationMessages(ctx) {\n  const c = ctx.clinic;\n  const out = [msgText(`📍 ${c.name}\\n${c.address}` + (c.maps_url ? `\\n\\nComo chegar: ${c.maps_url}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction hoursMessage(ctx) {\n  const c = ctx.clinic;\n  return msgText(`Nosso horário de funcionamento é:\\n${c.hours_summary.split('; ').join('\\n')}` +\n    (c.is_open_now ? '\\n\\nEstamos abertos agora.' : (c.next_opening_label ? `\\n\\nAbrimos novamente ${c.next_opening_label}.` : '')));\n}\n\nfunction appointmentsListText(appts) {\n  return appts.map((a, i) => `${i + 1}) ${a.label} — ${a.service_name} com ${a.professional_name}`).join('\\n');\n}\n\nfunction chooseAppointmentMessage(appts, purpose) {\n  const verb = purpose === 'cancel' ? 'cancelar' : 'remarcar';\n  const text = `Você tem estas consultas:\\n\\n${appointmentsListText(appts)}\\n\\nQual delas deseja ${verb}?`;\n  if (appts.length <= 3) return msgButtons(text, appts.map((a, i) => ({ id: 'APPT:' + a.id, title: `${i + 1}) ${a.short_label}` })));\n  return msgList(text, 'Escolher', appts.map((a, i) => ({ id: 'APPT:' + a.id, title: a.short_label, description: `${a.service_name} – ${a.professional_name}` })));\n}\n\nfunction cancelConfirmMessage(label, late, ctx) {\n  const policy = late ? `\\n\\nAtenção: ${clinicMsg(ctx, 'cancel_policy', 'o cancelamento está sendo feito com pouca antecedência.')}` : '';\n  return msgButtons(`Confirma o cancelamento da consulta de ${label}?${policy}`, [\n    { id: 'YES', title: 'Sim, cancelar' },\n    { id: 'NO', title: 'Não, manter' },\n  ]);\n}\n\nfunction serviceInfoMessages(ctx, svc) {\n  const parts = [`Sim! Fazemos ${svc.name.toLowerCase()}.`];\n  if (svc.description) parts.push(svc.description);\n  if (svc.price_info) parts.push(svc.price_info);\n  const out = [msgText(parts.join(' '))];\n  if (svc.bookable_by_bot) out.push(msgButtons('Quer que eu veja os horários disponíveis?', [{ id: 'SVC:' + svc.code, title: 'Ver horários' }, { id: 'MENU:HUMAN', title: 'Falar com a equipe' }]));\n  else out.push(msgButtons('Esse agendamento é feito pela nossa equipe. Posso chamar alguém para você?', [{ id: 'MENU:HUMAN', title: 'Sim, por favor' }]));\n  return out;\n}\n\nfunction notUnderstoodMessage(ctx, aiReply) {\n  return menuMessage((aiReply && aiReply.length > 3 ? aiReply + '\\n\\n' : 'Desculpe, não entendi muito bem. ') +\n    'Posso ajudar com agendamentos, remarcações, cancelamentos e informações da clínica.');\n}\n\nfunction technicalErrorMessage() {\n  return msgText('Desculpe, tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.');\n}\n\nfunction unsupportedMediaMessage() {\n  return msgText('Por aqui eu consigo entender mensagens de texto e áudio. Por segurança, não envie fotos, exames ou documentos. Como posso ajudar?');\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n\n// ===== lógica do nó =====\nconst j = $json.input; const appts = ($json.result && $json.result.appointments) || [];\nconst p = (j.decision && j.decision.params) || {};\nconst done = (messages, state, context) => ({ json: Object.assign({}, j, { appts, next: 'done', result: { messages, state: state || 'idle', context: context || {} } }) });\nconst go = (next, extra) => ({ json: Object.assign({}, j, { appts, next }, extra) });\nconst own = (id) => appts.find((a) => a.id === id);\nconst notFound = () => done([msgText('Não encontrei essa consulta entre as suas consultas futuras. Posso ajudar com outra coisa?')]);\nconst none = () => done([msgButtons('Não encontrei consultas futuras no seu cadastro. Quer agendar uma?', [{ id: 'MENU:SCHEDULE', title: 'Agendar consulta' }])]);\nswitch (p.action) {\n  case 'list': {\n    if (!appts.length) return none();\n    const btns = [{ id: 'MENU:SCHEDULE', title: 'Agendar outra' }];\n    if (appts.length === 1) btns.push({ id: 'RESCHEDULE:' + appts[0].id, title: 'Remarcar' }, { id: 'CANCEL:' + appts[0].id, title: 'Cancelar' });\n    return done([msgButtons('Suas próximas consultas:\\n\\n' + appointmentsListText(appts), btns)]);\n  }\n  case 'cancel_start':\n  case 'reschedule_start': {\n    const purpose = p.action === 'cancel_start' ? 'cancel' : 'reschedule';\n    if (!appts.length) return none();\n    if (p.appointment_id && !own(p.appointment_id)) return notFound();\n    const target = p.appointment_id ? own(p.appointment_id) : (appts.length === 1 ? appts[0] : null);\n    if (!target) return done([chooseAppointmentMessage(appts, purpose)], 'awaiting_appointment_choice', { purpose, appointment_ids: appts.map((a) => a.id), prefs: p.prefs || {} });\n    return purpose === 'cancel' ? go('cancel_check', { appointment: target }) : go('reschedule_check', { appointment: target, prefs: p.prefs || {} });\n  }\n  case 'cancel_prompt': {\n    const t = own(p.appointment_id); if (!t) return notFound();\n    return go('cancel_check', { appointment: t });\n  }\n  case 'cancel_execute': {\n    const t = own(p.appointment_id); if (!t) return notFound();\n    return go('cancel_exec', { appointment: t });\n  }\n  case 'confirm_attendance': {\n    const t = p.appointment_id ? own(p.appointment_id) : appts[0];\n    if (!t) return p.appointment_id ? notFound() : none();\n    return go('attend', { appointment: t });\n  }\n  default:\n    return done([menuMessage('Como posso ajudar?')]);\n}\n"
+      },
+      "id": "3d9c9d61-1ef4-4bba-8cba-8fc0c5fe89b7",
+      "name": "Decidir ação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ff64b973-4620-4c3e-84c7-2733e013ee9a",
+                    "leftValue": "={{ $json.next }}",
+                    "rightValue": "cancel_check",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cancel_check"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "49242755-0ba1-440e-876b-dcec2f211fc1",
+                    "leftValue": "={{ $json.next }}",
+                    "rightValue": "cancel_exec",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cancel_exec"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "1e005f28-a4a0-4124-83ed-817d41fc86a8",
+                    "leftValue": "={{ $json.next }}",
+                    "rightValue": "reschedule_check",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reschedule_check"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "26473eb2-496c-4ef1-8cb0-e83537e49911",
+                    "leftValue": "={{ $json.next }}",
+                    "rightValue": "attend",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "attend"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1c65dd5-6152-49ce-8c4b-c9f85ae6badd",
+                    "leftValue": "={{ $json.next }}",
+                    "rightValue": "done",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "done"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "outro"
+        }
+      },
+      "id": "3d729265-a6ef-490d-821b-e37b809b437f",
+      "name": "Próximo passo",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_cancel_check($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ clinic_id: $json.ctx.clinic.id, patient_id: $json.ctx.patient.id, appointment_id: $json.appointment.id }), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "eebfd4d1-171e-4666-8d30-b8b0663e8fa0",
+      "name": "Verificar cancelamento",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        920,
+        -360
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/messages.js =====\n// messages.js — textos oficiais (pt-BR) e formato normalizado de mensagens de saída.\n// Formatos: {type:'text', text} | {type:'buttons', text, buttons:[{id,title}]} |\n//           {type:'list', text, button, rows:[{id,title,description}]} |\n//           {type:'location', latitude, longitude, name, address} | {type:'template', ...}\n// Requer: util.js\n\nfunction msgText(text) { return { type: 'text', text: truncate(text, 4000) }; }\nfunction msgButtons(text, buttons) {\n  return { type: 'buttons', text: truncate(text, 1024), buttons: (buttons || []).slice(0, 3).map((b) => ({ id: String(b.id).slice(0, 256), title: truncate(b.title, 20) })) };\n}\nfunction msgList(text, button, rows) {\n  return { type: 'list', text: truncate(text, 1024), button: truncate(button, 20),\n    rows: (rows || []).slice(0, 10).map((r) => ({ id: String(r.id).slice(0, 200), title: truncate(r.title, 24), description: r.description ? truncate(r.description, 72) : undefined })) };\n}\n\nconst DEFAULT_EMERGENCY = 'Se houver sangramento intenso que não para, inchaço que dificulta respirar ou engolir, febre alta com inchaço no rosto ou trauma forte na boca ou rosto, procure agora um pronto-socorro ou ligue 192 (SAMU).';\n\nfunction clinicMsg(ctx, key, fallback) {\n  const m = (ctx.clinic && ctx.clinic.messages) || {};\n  return m[key] || fallback || '';\n}\n\nfunction menuMessage(text) {\n  return msgButtons(text || 'Como posso ajudar?', [\n    { id: 'MENU:SCHEDULE', title: 'Agendar consulta' },\n    { id: 'MENU:APPTS', title: 'Minhas consultas' },\n    { id: 'MENU:HUMAN', title: 'Falar com a equipe' },\n  ]);\n}\n\nfunction greetingMessages(ctx, aiReply) {\n  const p = ctx.patient || {};\n  const out = [];\n  const name = p.first_name ? `, ${p.first_name}` : '';\n  if (p.is_new || !p.privacy_notice_shown) {\n    out.push(msgText(clinicMsg(ctx, 'welcome', `Olá! Sou a assistente virtual da ${ctx.clinic.name}.`)));\n    const notice = clinicMsg(ctx, 'privacy_notice', '');\n    if (notice) out.push(msgText(notice));\n  } else {\n    out.push(msgText(aiReply && aiReply.length > 3 ? aiReply : `Olá${name}! Que bom falar com você novamente.`));\n  }\n  out.push(menuMessage('Como posso ajudar?'));\n  return out;\n}\n\nfunction askServiceMessage(ctx, prefix) {\n  const rows = (ctx.services || []).filter((s) => s.bookable_by_bot).map((s) => ({\n    id: 'SVC:' + s.code, title: s.name, description: s.duration_minutes ? `Cerca de ${s.duration_minutes} min` : undefined,\n  }));\n  return msgList((prefix ? prefix + '\\n\\n' : '') + 'Para qual atendimento você gostaria de agendar?', 'Ver serviços', rows);\n}\n\nfunction askNameMessage() {\n  return msgText('Para fazer o seu cadastro, qual é o seu nome completo?');\n}\n\nfunction periodLabel(p) {\n  return { morning: 'pela manhã', afternoon: 'à tarde', evening: 'à noite' }[p] || '';\n}\n\nfunction offerMessages(offer, serviceName, opts) {\n  const o = opts || {};\n  const lines = offer.options.map((x) => `${x.option_number}) ${x.label} com ${x.professional_name}`);\n  let head = o.slotTaken ? 'Que pena, esse horário acabou de ser ocupado. ' : '';\n  if (offer.alternative_dates) head += 'Não encontrei horários na data pedida, mas tenho estas opções próximas';\n  else head += 'Tenho estes horários disponíveis';\n  head += serviceName ? ` para ${serviceName}:` : ':';\n  if (offer.period_relaxed && o.period) head = `Não há horários ${periodLabel(o.period)} nesse período. ` + head;\n  const body = `${head}\\n\\n${lines.join('\\n')}\\n\\nToque no horário desejado ou responda com o número. Assim que você escolher, eu confirmo na agenda.`;\n  return [msgButtons(body, offer.options.map((x) => ({ id: 'OPT:' + x.option_id, title: x.short_label || x.label })))];\n}\n\nfunction noSlotsMessage(ctx, serviceName) {\n  return msgText(`Não encontrei horários livres para ${serviceName || 'esse atendimento'} nos próximos dias. ` +\n    `Nosso horário de funcionamento é: ${ctx.clinic.hours_summary}. Quer que eu tente outra data ou período, ou prefere falar com a equipe?`);\n}\n\nfunction bookedMessages(ctx, b) {\n  const c = ctx.clinic;\n  const out = [msgText(\n    `Pronto${ctx.patient && ctx.patient.first_name ? ', ' + ctx.patient.first_name : ''}! Sua consulta está agendada ✅\\n\\n` +\n    `📅 ${b.label}\\n🦷 ${b.service_name}\\n👩‍⚕️ ${b.professional_name}\\n📍 ${c.name} — ${c.address}` +\n    (c.maps_url ? `\\n🗺️ ${c.maps_url}` : '') +\n    `\\n\\nVocê receberá um lembrete um dia antes. Para remarcar ou cancelar, é só me escrever por aqui.` +\n    (clinicMsg(ctx, 'cancel_policy') ? `\\n\\n${clinicMsg(ctx, 'cancel_policy')}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction locationMessage(ctx) {\n  const c = ctx.clinic || {};\n  if (c.latitude === null || c.latitude === undefined || c.longitude === null || c.longitude === undefined) return null;\n  return { type: 'location', latitude: Number(c.latitude), longitude: Number(c.longitude), name: c.name, address: c.address };\n}\n\nfunction locationMessages(ctx) {\n  const c = ctx.clinic;\n  const out = [msgText(`📍 ${c.name}\\n${c.address}` + (c.maps_url ? `\\n\\nComo chegar: ${c.maps_url}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction hoursMessage(ctx) {\n  const c = ctx.clinic;\n  return msgText(`Nosso horário de funcionamento é:\\n${c.hours_summary.split('; ').join('\\n')}` +\n    (c.is_open_now ? '\\n\\nEstamos abertos agora.' : (c.next_opening_label ? `\\n\\nAbrimos novamente ${c.next_opening_label}.` : '')));\n}\n\nfunction appointmentsListText(appts) {\n  return appts.map((a, i) => `${i + 1}) ${a.label} — ${a.service_name} com ${a.professional_name}`).join('\\n');\n}\n\nfunction chooseAppointmentMessage(appts, purpose) {\n  const verb = purpose === 'cancel' ? 'cancelar' : 'remarcar';\n  const text = `Você tem estas consultas:\\n\\n${appointmentsListText(appts)}\\n\\nQual delas deseja ${verb}?`;\n  if (appts.length <= 3) return msgButtons(text, appts.map((a, i) => ({ id: 'APPT:' + a.id, title: `${i + 1}) ${a.short_label}` })));\n  return msgList(text, 'Escolher', appts.map((a, i) => ({ id: 'APPT:' + a.id, title: a.short_label, description: `${a.service_name} – ${a.professional_name}` })));\n}\n\nfunction cancelConfirmMessage(label, late, ctx) {\n  const policy = late ? `\\n\\nAtenção: ${clinicMsg(ctx, 'cancel_policy', 'o cancelamento está sendo feito com pouca antecedência.')}` : '';\n  return msgButtons(`Confirma o cancelamento da consulta de ${label}?${policy}`, [\n    { id: 'YES', title: 'Sim, cancelar' },\n    { id: 'NO', title: 'Não, manter' },\n  ]);\n}\n\nfunction serviceInfoMessages(ctx, svc) {\n  const parts = [`Sim! Fazemos ${svc.name.toLowerCase()}.`];\n  if (svc.description) parts.push(svc.description);\n  if (svc.price_info) parts.push(svc.price_info);\n  const out = [msgText(parts.join(' '))];\n  if (svc.bookable_by_bot) out.push(msgButtons('Quer que eu veja os horários disponíveis?', [{ id: 'SVC:' + svc.code, title: 'Ver horários' }, { id: 'MENU:HUMAN', title: 'Falar com a equipe' }]));\n  else out.push(msgButtons('Esse agendamento é feito pela nossa equipe. Posso chamar alguém para você?', [{ id: 'MENU:HUMAN', title: 'Sim, por favor' }]));\n  return out;\n}\n\nfunction notUnderstoodMessage(ctx, aiReply) {\n  return menuMessage((aiReply && aiReply.length > 3 ? aiReply + '\\n\\n' : 'Desculpe, não entendi muito bem. ') +\n    'Posso ajudar com agendamentos, remarcações, cancelamentos e informações da clínica.');\n}\n\nfunction technicalErrorMessage() {\n  return msgText('Desculpe, tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.');\n}\n\nfunction unsupportedMediaMessage() {\n  return msgText('Por aqui eu consigo entender mensagens de texto e áudio. Por segurança, não envie fotos, exames ou documentos. Como posso ajudar?');\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n\n// ===== lógica do nó =====\nconst j = $json.input; const r = $json.result || {};\nif (r.status === 'ok') return { json: Object.assign({}, j, { next: 'done', result: { messages: [cancelConfirmMessage(r.label, r.late, j.ctx)], state: 'awaiting_cancel_confirmation', context: { appointment_id: r.appointment_id } } }) };\nif (r.status === 'policy_handoff') return { json: Object.assign({}, j, { next: 'handoff', handoff: { reason: 'policy', priority: 'normal' } }) };\nreturn { json: Object.assign({}, j, { next: 'done', result: { messages: [msgText('Essa consulta não pode mais ser cancelada por aqui. Posso chamar a equipe?')], state: 'idle', context: {} } }) };\n"
+      },
+      "id": "13da8e83-c9d3-49ff-8967-a2c8beebf08e",
+      "name": "Pedir confirmação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_cancel_request($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ clinic_id: $json.ctx.clinic.id, patient_id: $json.ctx.patient.id, appointment_id: $json.appointment.id, actor: 'patient', reason: 'patient_request' }), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "4de215e6-c7b8-4a1c-80bb-cf7540d471bf",
+      "name": "Solicitar cancelamento",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        920,
+        -180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/messages.js =====\n// messages.js — textos oficiais (pt-BR) e formato normalizado de mensagens de saída.\n// Formatos: {type:'text', text} | {type:'buttons', text, buttons:[{id,title}]} |\n//           {type:'list', text, button, rows:[{id,title,description}]} |\n//           {type:'location', latitude, longitude, name, address} | {type:'template', ...}\n// Requer: util.js\n\nfunction msgText(text) { return { type: 'text', text: truncate(text, 4000) }; }\nfunction msgButtons(text, buttons) {\n  return { type: 'buttons', text: truncate(text, 1024), buttons: (buttons || []).slice(0, 3).map((b) => ({ id: String(b.id).slice(0, 256), title: truncate(b.title, 20) })) };\n}\nfunction msgList(text, button, rows) {\n  return { type: 'list', text: truncate(text, 1024), button: truncate(button, 20),\n    rows: (rows || []).slice(0, 10).map((r) => ({ id: String(r.id).slice(0, 200), title: truncate(r.title, 24), description: r.description ? truncate(r.description, 72) : undefined })) };\n}\n\nconst DEFAULT_EMERGENCY = 'Se houver sangramento intenso que não para, inchaço que dificulta respirar ou engolir, febre alta com inchaço no rosto ou trauma forte na boca ou rosto, procure agora um pronto-socorro ou ligue 192 (SAMU).';\n\nfunction clinicMsg(ctx, key, fallback) {\n  const m = (ctx.clinic && ctx.clinic.messages) || {};\n  return m[key] || fallback || '';\n}\n\nfunction menuMessage(text) {\n  return msgButtons(text || 'Como posso ajudar?', [\n    { id: 'MENU:SCHEDULE', title: 'Agendar consulta' },\n    { id: 'MENU:APPTS', title: 'Minhas consultas' },\n    { id: 'MENU:HUMAN', title: 'Falar com a equipe' },\n  ]);\n}\n\nfunction greetingMessages(ctx, aiReply) {\n  const p = ctx.patient || {};\n  const out = [];\n  const name = p.first_name ? `, ${p.first_name}` : '';\n  if (p.is_new || !p.privacy_notice_shown) {\n    out.push(msgText(clinicMsg(ctx, 'welcome', `Olá! Sou a assistente virtual da ${ctx.clinic.name}.`)));\n    const notice = clinicMsg(ctx, 'privacy_notice', '');\n    if (notice) out.push(msgText(notice));\n  } else {\n    out.push(msgText(aiReply && aiReply.length > 3 ? aiReply : `Olá${name}! Que bom falar com você novamente.`));\n  }\n  out.push(menuMessage('Como posso ajudar?'));\n  return out;\n}\n\nfunction askServiceMessage(ctx, prefix) {\n  const rows = (ctx.services || []).filter((s) => s.bookable_by_bot).map((s) => ({\n    id: 'SVC:' + s.code, title: s.name, description: s.duration_minutes ? `Cerca de ${s.duration_minutes} min` : undefined,\n  }));\n  return msgList((prefix ? prefix + '\\n\\n' : '') + 'Para qual atendimento você gostaria de agendar?', 'Ver serviços', rows);\n}\n\nfunction askNameMessage() {\n  return msgText('Para fazer o seu cadastro, qual é o seu nome completo?');\n}\n\nfunction periodLabel(p) {\n  return { morning: 'pela manhã', afternoon: 'à tarde', evening: 'à noite' }[p] || '';\n}\n\nfunction offerMessages(offer, serviceName, opts) {\n  const o = opts || {};\n  const lines = offer.options.map((x) => `${x.option_number}) ${x.label} com ${x.professional_name}`);\n  let head = o.slotTaken ? 'Que pena, esse horário acabou de ser ocupado. ' : '';\n  if (offer.alternative_dates) head += 'Não encontrei horários na data pedida, mas tenho estas opções próximas';\n  else head += 'Tenho estes horários disponíveis';\n  head += serviceName ? ` para ${serviceName}:` : ':';\n  if (offer.period_relaxed && o.period) head = `Não há horários ${periodLabel(o.period)} nesse período. ` + head;\n  const body = `${head}\\n\\n${lines.join('\\n')}\\n\\nToque no horário desejado ou responda com o número. Assim que você escolher, eu confirmo na agenda.`;\n  return [msgButtons(body, offer.options.map((x) => ({ id: 'OPT:' + x.option_id, title: x.short_label || x.label })))];\n}\n\nfunction noSlotsMessage(ctx, serviceName) {\n  return msgText(`Não encontrei horários livres para ${serviceName || 'esse atendimento'} nos próximos dias. ` +\n    `Nosso horário de funcionamento é: ${ctx.clinic.hours_summary}. Quer que eu tente outra data ou período, ou prefere falar com a equipe?`);\n}\n\nfunction bookedMessages(ctx, b) {\n  const c = ctx.clinic;\n  const out = [msgText(\n    `Pronto${ctx.patient && ctx.patient.first_name ? ', ' + ctx.patient.first_name : ''}! Sua consulta está agendada ✅\\n\\n` +\n    `📅 ${b.label}\\n🦷 ${b.service_name}\\n👩‍⚕️ ${b.professional_name}\\n📍 ${c.name} — ${c.address}` +\n    (c.maps_url ? `\\n🗺️ ${c.maps_url}` : '') +\n    `\\n\\nVocê receberá um lembrete um dia antes. Para remarcar ou cancelar, é só me escrever por aqui.` +\n    (clinicMsg(ctx, 'cancel_policy') ? `\\n\\n${clinicMsg(ctx, 'cancel_policy')}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction locationMessage(ctx) {\n  const c = ctx.clinic || {};\n  if (c.latitude === null || c.latitude === undefined || c.longitude === null || c.longitude === undefined) return null;\n  return { type: 'location', latitude: Number(c.latitude), longitude: Number(c.longitude), name: c.name, address: c.address };\n}\n\nfunction locationMessages(ctx) {\n  const c = ctx.clinic;\n  const out = [msgText(`📍 ${c.name}\\n${c.address}` + (c.maps_url ? `\\n\\nComo chegar: ${c.maps_url}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction hoursMessage(ctx) {\n  const c = ctx.clinic;\n  return msgText(`Nosso horário de funcionamento é:\\n${c.hours_summary.split('; ').join('\\n')}` +\n    (c.is_open_now ? '\\n\\nEstamos abertos agora.' : (c.next_opening_label ? `\\n\\nAbrimos novamente ${c.next_opening_label}.` : '')));\n}\n\nfunction appointmentsListText(appts) {\n  return appts.map((a, i) => `${i + 1}) ${a.label} — ${a.service_name} com ${a.professional_name}`).join('\\n');\n}\n\nfunction chooseAppointmentMessage(appts, purpose) {\n  const verb = purpose === 'cancel' ? 'cancelar' : 'remarcar';\n  const text = `Você tem estas consultas:\\n\\n${appointmentsListText(appts)}\\n\\nQual delas deseja ${verb}?`;\n  if (appts.length <= 3) return msgButtons(text, appts.map((a, i) => ({ id: 'APPT:' + a.id, title: `${i + 1}) ${a.short_label}` })));\n  return msgList(text, 'Escolher', appts.map((a, i) => ({ id: 'APPT:' + a.id, title: a.short_label, description: `${a.service_name} – ${a.professional_name}` })));\n}\n\nfunction cancelConfirmMessage(label, late, ctx) {\n  const policy = late ? `\\n\\nAtenção: ${clinicMsg(ctx, 'cancel_policy', 'o cancelamento está sendo feito com pouca antecedência.')}` : '';\n  return msgButtons(`Confirma o cancelamento da consulta de ${label}?${policy}`, [\n    { id: 'YES', title: 'Sim, cancelar' },\n    { id: 'NO', title: 'Não, manter' },\n  ]);\n}\n\nfunction serviceInfoMessages(ctx, svc) {\n  const parts = [`Sim! Fazemos ${svc.name.toLowerCase()}.`];\n  if (svc.description) parts.push(svc.description);\n  if (svc.price_info) parts.push(svc.price_info);\n  const out = [msgText(parts.join(' '))];\n  if (svc.bookable_by_bot) out.push(msgButtons('Quer que eu veja os horários disponíveis?', [{ id: 'SVC:' + svc.code, title: 'Ver horários' }, { id: 'MENU:HUMAN', title: 'Falar com a equipe' }]));\n  else out.push(msgButtons('Esse agendamento é feito pela nossa equipe. Posso chamar alguém para você?', [{ id: 'MENU:HUMAN', title: 'Sim, por favor' }]));\n  return out;\n}\n\nfunction notUnderstoodMessage(ctx, aiReply) {\n  return menuMessage((aiReply && aiReply.length > 3 ? aiReply + '\\n\\n' : 'Desculpe, não entendi muito bem. ') +\n    'Posso ajudar com agendamentos, remarcações, cancelamentos e informações da clínica.');\n}\n\nfunction technicalErrorMessage() {\n  return msgText('Desculpe, tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.');\n}\n\nfunction unsupportedMediaMessage() {\n  return msgText('Por aqui eu consigo entender mensagens de texto e áudio. Por segurança, não envie fotos, exames ou documentos. Como posso ajudar?');\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n\n// ===== lógica do nó =====\nconst j = $json.input; const r = $json.result || {};\nif (r.status === 'ok') return { json: Object.assign({}, j, { cancel: r, next: 'calendar',\n  calendar: Object.assign({ settings: j.ctx.settings, timezone: j.ctx.clinic.timezone, clinic: { id: j.ctx.clinic.id, external_calendar_base_url: j.ctx.clinic.external_calendar_base_url } }, { op: 'delete_event', provider: r.calendar_provider, calendar_id: r.calendar_id, event_id: r.calendar_event_id }) }) };\nif (r.status === 'policy_handoff') return { json: Object.assign({}, j, { next: 'handoff', handoff: { reason: 'policy', priority: 'normal' } }) };\nreturn { json: Object.assign({}, j, { next: 'done', result: { messages: [msgText('Não encontrei essa consulta ativa para cancelar. Posso ajudar com outra coisa?')], state: 'idle', context: {} } }) };\n"
+      },
+      "id": "aa6f63dd-f6f1-4c30-8f56-6dff4616306e",
+      "name": "Avaliar pedido",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8172c280-82d1-4b8a-8ec9-a8076734a856",
+              "leftValue": "={{ $json.next === 'calendar' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bf9f8178-8551-4ec7-81ca-d51f16e200d2",
+      "name": "Cancelamento aceito?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1360,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf08AdaptAgen",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "e5418144-ba3b-49fe-8549-9d05413f9f61",
+      "name": "Remover da agenda (WF08)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1580,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "391573ed-a993-4c57-8399-16d6e3d3e1f1",
+              "leftValue": "={{ $json.calendar_result && $json.calendar_result.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ed34dd3c-9346-48a6-8207-88561b1a41af",
+      "name": "Removido da agenda?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1800,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_cancel_finalize($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ appointment_id: $json.cancel.appointment_id, calendar_ok: true }), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "a83c6e70-c29c-42f6-8131-32870fc58953",
+      "name": "Concluir cancelamento",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2020,
+        -340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/messages.js =====\n// messages.js — textos oficiais (pt-BR) e formato normalizado de mensagens de saída.\n// Formatos: {type:'text', text} | {type:'buttons', text, buttons:[{id,title}]} |\n//           {type:'list', text, button, rows:[{id,title,description}]} |\n//           {type:'location', latitude, longitude, name, address} | {type:'template', ...}\n// Requer: util.js\n\nfunction msgText(text) { return { type: 'text', text: truncate(text, 4000) }; }\nfunction msgButtons(text, buttons) {\n  return { type: 'buttons', text: truncate(text, 1024), buttons: (buttons || []).slice(0, 3).map((b) => ({ id: String(b.id).slice(0, 256), title: truncate(b.title, 20) })) };\n}\nfunction msgList(text, button, rows) {\n  return { type: 'list', text: truncate(text, 1024), button: truncate(button, 20),\n    rows: (rows || []).slice(0, 10).map((r) => ({ id: String(r.id).slice(0, 200), title: truncate(r.title, 24), description: r.description ? truncate(r.description, 72) : undefined })) };\n}\n\nconst DEFAULT_EMERGENCY = 'Se houver sangramento intenso que não para, inchaço que dificulta respirar ou engolir, febre alta com inchaço no rosto ou trauma forte na boca ou rosto, procure agora um pronto-socorro ou ligue 192 (SAMU).';\n\nfunction clinicMsg(ctx, key, fallback) {\n  const m = (ctx.clinic && ctx.clinic.messages) || {};\n  return m[key] || fallback || '';\n}\n\nfunction menuMessage(text) {\n  return msgButtons(text || 'Como posso ajudar?', [\n    { id: 'MENU:SCHEDULE', title: 'Agendar consulta' },\n    { id: 'MENU:APPTS', title: 'Minhas consultas' },\n    { id: 'MENU:HUMAN', title: 'Falar com a equipe' },\n  ]);\n}\n\nfunction greetingMessages(ctx, aiReply) {\n  const p = ctx.patient || {};\n  const out = [];\n  const name = p.first_name ? `, ${p.first_name}` : '';\n  if (p.is_new || !p.privacy_notice_shown) {\n    out.push(msgText(clinicMsg(ctx, 'welcome', `Olá! Sou a assistente virtual da ${ctx.clinic.name}.`)));\n    const notice = clinicMsg(ctx, 'privacy_notice', '');\n    if (notice) out.push(msgText(notice));\n  } else {\n    out.push(msgText(aiReply && aiReply.length > 3 ? aiReply : `Olá${name}! Que bom falar com você novamente.`));\n  }\n  out.push(menuMessage('Como posso ajudar?'));\n  return out;\n}\n\nfunction askServiceMessage(ctx, prefix) {\n  const rows = (ctx.services || []).filter((s) => s.bookable_by_bot).map((s) => ({\n    id: 'SVC:' + s.code, title: s.name, description: s.duration_minutes ? `Cerca de ${s.duration_minutes} min` : undefined,\n  }));\n  return msgList((prefix ? prefix + '\\n\\n' : '') + 'Para qual atendimento você gostaria de agendar?', 'Ver serviços', rows);\n}\n\nfunction askNameMessage() {\n  return msgText('Para fazer o seu cadastro, qual é o seu nome completo?');\n}\n\nfunction periodLabel(p) {\n  return { morning: 'pela manhã', afternoon: 'à tarde', evening: 'à noite' }[p] || '';\n}\n\nfunction offerMessages(offer, serviceName, opts) {\n  const o = opts || {};\n  const lines = offer.options.map((x) => `${x.option_number}) ${x.label} com ${x.professional_name}`);\n  let head = o.slotTaken ? 'Que pena, esse horário acabou de ser ocupado. ' : '';\n  if (offer.alternative_dates) head += 'Não encontrei horários na data pedida, mas tenho estas opções próximas';\n  else head += 'Tenho estes horários disponíveis';\n  head += serviceName ? ` para ${serviceName}:` : ':';\n  if (offer.period_relaxed && o.period) head = `Não há horários ${periodLabel(o.period)} nesse período. ` + head;\n  const body = `${head}\\n\\n${lines.join('\\n')}\\n\\nToque no horário desejado ou responda com o número. Assim que você escolher, eu confirmo na agenda.`;\n  return [msgButtons(body, offer.options.map((x) => ({ id: 'OPT:' + x.option_id, title: x.short_label || x.label })))];\n}\n\nfunction noSlotsMessage(ctx, serviceName) {\n  return msgText(`Não encontrei horários livres para ${serviceName || 'esse atendimento'} nos próximos dias. ` +\n    `Nosso horário de funcionamento é: ${ctx.clinic.hours_summary}. Quer que eu tente outra data ou período, ou prefere falar com a equipe?`);\n}\n\nfunction bookedMessages(ctx, b) {\n  const c = ctx.clinic;\n  const out = [msgText(\n    `Pronto${ctx.patient && ctx.patient.first_name ? ', ' + ctx.patient.first_name : ''}! Sua consulta está agendada ✅\\n\\n` +\n    `📅 ${b.label}\\n🦷 ${b.service_name}\\n👩‍⚕️ ${b.professional_name}\\n📍 ${c.name} — ${c.address}` +\n    (c.maps_url ? `\\n🗺️ ${c.maps_url}` : '') +\n    `\\n\\nVocê receberá um lembrete um dia antes. Para remarcar ou cancelar, é só me escrever por aqui.` +\n    (clinicMsg(ctx, 'cancel_policy') ? `\\n\\n${clinicMsg(ctx, 'cancel_policy')}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction locationMessage(ctx) {\n  const c = ctx.clinic || {};\n  if (c.latitude === null || c.latitude === undefined || c.longitude === null || c.longitude === undefined) return null;\n  return { type: 'location', latitude: Number(c.latitude), longitude: Number(c.longitude), name: c.name, address: c.address };\n}\n\nfunction locationMessages(ctx) {\n  const c = ctx.clinic;\n  const out = [msgText(`📍 ${c.name}\\n${c.address}` + (c.maps_url ? `\\n\\nComo chegar: ${c.maps_url}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction hoursMessage(ctx) {\n  const c = ctx.clinic;\n  return msgText(`Nosso horário de funcionamento é:\\n${c.hours_summary.split('; ').join('\\n')}` +\n    (c.is_open_now ? '\\n\\nEstamos abertos agora.' : (c.next_opening_label ? `\\n\\nAbrimos novamente ${c.next_opening_label}.` : '')));\n}\n\nfunction appointmentsListText(appts) {\n  return appts.map((a, i) => `${i + 1}) ${a.label} — ${a.service_name} com ${a.professional_name}`).join('\\n');\n}\n\nfunction chooseAppointmentMessage(appts, purpose) {\n  const verb = purpose === 'cancel' ? 'cancelar' : 'remarcar';\n  const text = `Você tem estas consultas:\\n\\n${appointmentsListText(appts)}\\n\\nQual delas deseja ${verb}?`;\n  if (appts.length <= 3) return msgButtons(text, appts.map((a, i) => ({ id: 'APPT:' + a.id, title: `${i + 1}) ${a.short_label}` })));\n  return msgList(text, 'Escolher', appts.map((a, i) => ({ id: 'APPT:' + a.id, title: a.short_label, description: `${a.service_name} – ${a.professional_name}` })));\n}\n\nfunction cancelConfirmMessage(label, late, ctx) {\n  const policy = late ? `\\n\\nAtenção: ${clinicMsg(ctx, 'cancel_policy', 'o cancelamento está sendo feito com pouca antecedência.')}` : '';\n  return msgButtons(`Confirma o cancelamento da consulta de ${label}?${policy}`, [\n    { id: 'YES', title: 'Sim, cancelar' },\n    { id: 'NO', title: 'Não, manter' },\n  ]);\n}\n\nfunction serviceInfoMessages(ctx, svc) {\n  const parts = [`Sim! Fazemos ${svc.name.toLowerCase()}.`];\n  if (svc.description) parts.push(svc.description);\n  if (svc.price_info) parts.push(svc.price_info);\n  const out = [msgText(parts.join(' '))];\n  if (svc.bookable_by_bot) out.push(msgButtons('Quer que eu veja os horários disponíveis?', [{ id: 'SVC:' + svc.code, title: 'Ver horários' }, { id: 'MENU:HUMAN', title: 'Falar com a equipe' }]));\n  else out.push(msgButtons('Esse agendamento é feito pela nossa equipe. Posso chamar alguém para você?', [{ id: 'MENU:HUMAN', title: 'Sim, por favor' }]));\n  return out;\n}\n\nfunction notUnderstoodMessage(ctx, aiReply) {\n  return menuMessage((aiReply && aiReply.length > 3 ? aiReply + '\\n\\n' : 'Desculpe, não entendi muito bem. ') +\n    'Posso ajudar com agendamentos, remarcações, cancelamentos e informações da clínica.');\n}\n\nfunction technicalErrorMessage() {\n  return msgText('Desculpe, tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.');\n}\n\nfunction unsupportedMediaMessage() {\n  return msgText('Por aqui eu consigo entender mensagens de texto e áudio. Por segurança, não envie fotos, exames ou documentos. Como posso ajudar?');\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n\n// ===== lógica do nó =====\nconst j = $json.input;\nreturn { json: Object.assign({}, j, { next: 'done', result: { state: 'idle', context: {}, messages: [msgButtons(\n  'Pronto, sua consulta de ' + j.cancel.label + ' foi cancelada. Quer agendar um novo horário?',\n  [{ id: 'MENU:SCHEDULE', title: 'Agendar novo horário' }, { id: 'NO', title: 'Agora não' }])] } }) };\n"
+      },
+      "id": "68afbbfc-cf43-4c55-806b-58674fc9f97c",
+      "name": "Cancelamento concluído",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        -340
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_cancel_revert($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ appointment_id: $json.cancel.appointment_id }), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "7e0bfedf-60a7-4f3b-8c3e-69f188683bcb",
+      "name": "Reverter cancelamento",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2020,
+        -180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst j = $json.input;\nreturn { json: Object.assign({}, j, { next: 'handoff', handoff: { reason: 'technical_failure', priority: 'normal' } }) };\n"
+      },
+      "id": "b3f593a1-ebb5-490c-8791-36c1caef0792",
+      "name": "Falha no cancelamento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_reschedule_check($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ clinic_id: $json.ctx.clinic.id, patient_id: $json.ctx.patient.id, appointment_id: $json.appointment.id }), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "2607300b-891f-4483-8539-570f923dd14f",
+      "name": "Verificar remarcação",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        920,
+        40
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/messages.js =====\n// messages.js — textos oficiais (pt-BR) e formato normalizado de mensagens de saída.\n// Formatos: {type:'text', text} | {type:'buttons', text, buttons:[{id,title}]} |\n//           {type:'list', text, button, rows:[{id,title,description}]} |\n//           {type:'location', latitude, longitude, name, address} | {type:'template', ...}\n// Requer: util.js\n\nfunction msgText(text) { return { type: 'text', text: truncate(text, 4000) }; }\nfunction msgButtons(text, buttons) {\n  return { type: 'buttons', text: truncate(text, 1024), buttons: (buttons || []).slice(0, 3).map((b) => ({ id: String(b.id).slice(0, 256), title: truncate(b.title, 20) })) };\n}\nfunction msgList(text, button, rows) {\n  return { type: 'list', text: truncate(text, 1024), button: truncate(button, 20),\n    rows: (rows || []).slice(0, 10).map((r) => ({ id: String(r.id).slice(0, 200), title: truncate(r.title, 24), description: r.description ? truncate(r.description, 72) : undefined })) };\n}\n\nconst DEFAULT_EMERGENCY = 'Se houver sangramento intenso que não para, inchaço que dificulta respirar ou engolir, febre alta com inchaço no rosto ou trauma forte na boca ou rosto, procure agora um pronto-socorro ou ligue 192 (SAMU).';\n\nfunction clinicMsg(ctx, key, fallback) {\n  const m = (ctx.clinic && ctx.clinic.messages) || {};\n  return m[key] || fallback || '';\n}\n\nfunction menuMessage(text) {\n  return msgButtons(text || 'Como posso ajudar?', [\n    { id: 'MENU:SCHEDULE', title: 'Agendar consulta' },\n    { id: 'MENU:APPTS', title: 'Minhas consultas' },\n    { id: 'MENU:HUMAN', title: 'Falar com a equipe' },\n  ]);\n}\n\nfunction greetingMessages(ctx, aiReply) {\n  const p = ctx.patient || {};\n  const out = [];\n  const name = p.first_name ? `, ${p.first_name}` : '';\n  if (p.is_new || !p.privacy_notice_shown) {\n    out.push(msgText(clinicMsg(ctx, 'welcome', `Olá! Sou a assistente virtual da ${ctx.clinic.name}.`)));\n    const notice = clinicMsg(ctx, 'privacy_notice', '');\n    if (notice) out.push(msgText(notice));\n  } else {\n    out.push(msgText(aiReply && aiReply.length > 3 ? aiReply : `Olá${name}! Que bom falar com você novamente.`));\n  }\n  out.push(menuMessage('Como posso ajudar?'));\n  return out;\n}\n\nfunction askServiceMessage(ctx, prefix) {\n  const rows = (ctx.services || []).filter((s) => s.bookable_by_bot).map((s) => ({\n    id: 'SVC:' + s.code, title: s.name, description: s.duration_minutes ? `Cerca de ${s.duration_minutes} min` : undefined,\n  }));\n  return msgList((prefix ? prefix + '\\n\\n' : '') + 'Para qual atendimento você gostaria de agendar?', 'Ver serviços', rows);\n}\n\nfunction askNameMessage() {\n  return msgText('Para fazer o seu cadastro, qual é o seu nome completo?');\n}\n\nfunction periodLabel(p) {\n  return { morning: 'pela manhã', afternoon: 'à tarde', evening: 'à noite' }[p] || '';\n}\n\nfunction offerMessages(offer, serviceName, opts) {\n  const o = opts || {};\n  const lines = offer.options.map((x) => `${x.option_number}) ${x.label} com ${x.professional_name}`);\n  let head = o.slotTaken ? 'Que pena, esse horário acabou de ser ocupado. ' : '';\n  if (offer.alternative_dates) head += 'Não encontrei horários na data pedida, mas tenho estas opções próximas';\n  else head += 'Tenho estes horários disponíveis';\n  head += serviceName ? ` para ${serviceName}:` : ':';\n  if (offer.period_relaxed && o.period) head = `Não há horários ${periodLabel(o.period)} nesse período. ` + head;\n  const body = `${head}\\n\\n${lines.join('\\n')}\\n\\nToque no horário desejado ou responda com o número. Assim que você escolher, eu confirmo na agenda.`;\n  return [msgButtons(body, offer.options.map((x) => ({ id: 'OPT:' + x.option_id, title: x.short_label || x.label })))];\n}\n\nfunction noSlotsMessage(ctx, serviceName) {\n  return msgText(`Não encontrei horários livres para ${serviceName || 'esse atendimento'} nos próximos dias. ` +\n    `Nosso horário de funcionamento é: ${ctx.clinic.hours_summary}. Quer que eu tente outra data ou período, ou prefere falar com a equipe?`);\n}\n\nfunction bookedMessages(ctx, b) {\n  const c = ctx.clinic;\n  const out = [msgText(\n    `Pronto${ctx.patient && ctx.patient.first_name ? ', ' + ctx.patient.first_name : ''}! Sua consulta está agendada ✅\\n\\n` +\n    `📅 ${b.label}\\n🦷 ${b.service_name}\\n👩‍⚕️ ${b.professional_name}\\n📍 ${c.name} — ${c.address}` +\n    (c.maps_url ? `\\n🗺️ ${c.maps_url}` : '') +\n    `\\n\\nVocê receberá um lembrete um dia antes. Para remarcar ou cancelar, é só me escrever por aqui.` +\n    (clinicMsg(ctx, 'cancel_policy') ? `\\n\\n${clinicMsg(ctx, 'cancel_policy')}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction locationMessage(ctx) {\n  const c = ctx.clinic || {};\n  if (c.latitude === null || c.latitude === undefined || c.longitude === null || c.longitude === undefined) return null;\n  return { type: 'location', latitude: Number(c.latitude), longitude: Number(c.longitude), name: c.name, address: c.address };\n}\n\nfunction locationMessages(ctx) {\n  const c = ctx.clinic;\n  const out = [msgText(`📍 ${c.name}\\n${c.address}` + (c.maps_url ? `\\n\\nComo chegar: ${c.maps_url}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction hoursMessage(ctx) {\n  const c = ctx.clinic;\n  return msgText(`Nosso horário de funcionamento é:\\n${c.hours_summary.split('; ').join('\\n')}` +\n    (c.is_open_now ? '\\n\\nEstamos abertos agora.' : (c.next_opening_label ? `\\n\\nAbrimos novamente ${c.next_opening_label}.` : '')));\n}\n\nfunction appointmentsListText(appts) {\n  return appts.map((a, i) => `${i + 1}) ${a.label} — ${a.service_name} com ${a.professional_name}`).join('\\n');\n}\n\nfunction chooseAppointmentMessage(appts, purpose) {\n  const verb = purpose === 'cancel' ? 'cancelar' : 'remarcar';\n  const text = `Você tem estas consultas:\\n\\n${appointmentsListText(appts)}\\n\\nQual delas deseja ${verb}?`;\n  if (appts.length <= 3) return msgButtons(text, appts.map((a, i) => ({ id: 'APPT:' + a.id, title: `${i + 1}) ${a.short_label}` })));\n  return msgList(text, 'Escolher', appts.map((a, i) => ({ id: 'APPT:' + a.id, title: a.short_label, description: `${a.service_name} – ${a.professional_name}` })));\n}\n\nfunction cancelConfirmMessage(label, late, ctx) {\n  const policy = late ? `\\n\\nAtenção: ${clinicMsg(ctx, 'cancel_policy', 'o cancelamento está sendo feito com pouca antecedência.')}` : '';\n  return msgButtons(`Confirma o cancelamento da consulta de ${label}?${policy}`, [\n    { id: 'YES', title: 'Sim, cancelar' },\n    { id: 'NO', title: 'Não, manter' },\n  ]);\n}\n\nfunction serviceInfoMessages(ctx, svc) {\n  const parts = [`Sim! Fazemos ${svc.name.toLowerCase()}.`];\n  if (svc.description) parts.push(svc.description);\n  if (svc.price_info) parts.push(svc.price_info);\n  const out = [msgText(parts.join(' '))];\n  if (svc.bookable_by_bot) out.push(msgButtons('Quer que eu veja os horários disponíveis?', [{ id: 'SVC:' + svc.code, title: 'Ver horários' }, { id: 'MENU:HUMAN', title: 'Falar com a equipe' }]));\n  else out.push(msgButtons('Esse agendamento é feito pela nossa equipe. Posso chamar alguém para você?', [{ id: 'MENU:HUMAN', title: 'Sim, por favor' }]));\n  return out;\n}\n\nfunction notUnderstoodMessage(ctx, aiReply) {\n  return menuMessage((aiReply && aiReply.length > 3 ? aiReply + '\\n\\n' : 'Desculpe, não entendi muito bem. ') +\n    'Posso ajudar com agendamentos, remarcações, cancelamentos e informações da clínica.');\n}\n\nfunction technicalErrorMessage() {\n  return msgText('Desculpe, tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.');\n}\n\nfunction unsupportedMediaMessage() {\n  return msgText('Por aqui eu consigo entender mensagens de texto e áudio. Por segurança, não envie fotos, exames ou documentos. Como posso ajudar?');\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n\n// ===== lógica do nó =====\nconst j = $json.input; const r = $json.result || {};\nif (r.status === 'ok') {\n  const prefs = j.prefs || {};\n  return { json: Object.assign({}, j, { next: 'schedule',\n    prefix_messages: [msgText('Vamos remarcar sua consulta de ' + r.label + '. Ela continua garantida até você confirmar o novo horário.')],\n    decision: Object.assign({}, j.decision, { route: 'schedule', params: { action: 'offer', service_code: r.service_code, reschedule_of: r.appointment_id,\n      professional_id: prefs.professional_id || null, date_from: prefs.date_from || null, date_to: prefs.date_to || null, period: prefs.period || null, time: prefs.time || null } }) }) };\n}\nif (r.status === 'policy_handoff') return { json: Object.assign({}, j, { next: 'handoff', handoff: { reason: 'policy', priority: 'normal' } }) };\nreturn { json: Object.assign({}, j, { next: 'done', result: { messages: [msgText('Não encontrei essa consulta ativa para remarcar.')], state: 'idle', context: {} } }) };\n"
+      },
+      "id": "00708947-301d-478e-8d3e-53a63c7ea43e",
+      "name": "Preparar remarcação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "abb357a0-860c-40b4-8169-23a61b4bf3ac",
+              "leftValue": "={{ $json.next === 'schedule' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7ae563a8-7da7-4e06-8aa5-28d07355eba4",
+      "name": "Oferecer horários?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1360,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf02Agendamen",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "98e3db25-9b91-42c0-8f30-7822b8e1995e",
+      "name": "Oferecer novos horários (WF02)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1580,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_attendance_confirm($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ clinic_id: $json.ctx.clinic.id, patient_id: $json.ctx.patient.id, appointment_id: $json.appointment.id }), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "193f73c2-f0b1-40a0-8064-f77fe1465ccd",
+      "name": "Confirmar presença",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        920,
+        220
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/messages.js =====\n// messages.js — textos oficiais (pt-BR) e formato normalizado de mensagens de saída.\n// Formatos: {type:'text', text} | {type:'buttons', text, buttons:[{id,title}]} |\n//           {type:'list', text, button, rows:[{id,title,description}]} |\n//           {type:'location', latitude, longitude, name, address} | {type:'template', ...}\n// Requer: util.js\n\nfunction msgText(text) { return { type: 'text', text: truncate(text, 4000) }; }\nfunction msgButtons(text, buttons) {\n  return { type: 'buttons', text: truncate(text, 1024), buttons: (buttons || []).slice(0, 3).map((b) => ({ id: String(b.id).slice(0, 256), title: truncate(b.title, 20) })) };\n}\nfunction msgList(text, button, rows) {\n  return { type: 'list', text: truncate(text, 1024), button: truncate(button, 20),\n    rows: (rows || []).slice(0, 10).map((r) => ({ id: String(r.id).slice(0, 200), title: truncate(r.title, 24), description: r.description ? truncate(r.description, 72) : undefined })) };\n}\n\nconst DEFAULT_EMERGENCY = 'Se houver sangramento intenso que não para, inchaço que dificulta respirar ou engolir, febre alta com inchaço no rosto ou trauma forte na boca ou rosto, procure agora um pronto-socorro ou ligue 192 (SAMU).';\n\nfunction clinicMsg(ctx, key, fallback) {\n  const m = (ctx.clinic && ctx.clinic.messages) || {};\n  return m[key] || fallback || '';\n}\n\nfunction menuMessage(text) {\n  return msgButtons(text || 'Como posso ajudar?', [\n    { id: 'MENU:SCHEDULE', title: 'Agendar consulta' },\n    { id: 'MENU:APPTS', title: 'Minhas consultas' },\n    { id: 'MENU:HUMAN', title: 'Falar com a equipe' },\n  ]);\n}\n\nfunction greetingMessages(ctx, aiReply) {\n  const p = ctx.patient || {};\n  const out = [];\n  const name = p.first_name ? `, ${p.first_name}` : '';\n  if (p.is_new || !p.privacy_notice_shown) {\n    out.push(msgText(clinicMsg(ctx, 'welcome', `Olá! Sou a assistente virtual da ${ctx.clinic.name}.`)));\n    const notice = clinicMsg(ctx, 'privacy_notice', '');\n    if (notice) out.push(msgText(notice));\n  } else {\n    out.push(msgText(aiReply && aiReply.length > 3 ? aiReply : `Olá${name}! Que bom falar com você novamente.`));\n  }\n  out.push(menuMessage('Como posso ajudar?'));\n  return out;\n}\n\nfunction askServiceMessage(ctx, prefix) {\n  const rows = (ctx.services || []).filter((s) => s.bookable_by_bot).map((s) => ({\n    id: 'SVC:' + s.code, title: s.name, description: s.duration_minutes ? `Cerca de ${s.duration_minutes} min` : undefined,\n  }));\n  return msgList((prefix ? prefix + '\\n\\n' : '') + 'Para qual atendimento você gostaria de agendar?', 'Ver serviços', rows);\n}\n\nfunction askNameMessage() {\n  return msgText('Para fazer o seu cadastro, qual é o seu nome completo?');\n}\n\nfunction periodLabel(p) {\n  return { morning: 'pela manhã', afternoon: 'à tarde', evening: 'à noite' }[p] || '';\n}\n\nfunction offerMessages(offer, serviceName, opts) {\n  const o = opts || {};\n  const lines = offer.options.map((x) => `${x.option_number}) ${x.label} com ${x.professional_name}`);\n  let head = o.slotTaken ? 'Que pena, esse horário acabou de ser ocupado. ' : '';\n  if (offer.alternative_dates) head += 'Não encontrei horários na data pedida, mas tenho estas opções próximas';\n  else head += 'Tenho estes horários disponíveis';\n  head += serviceName ? ` para ${serviceName}:` : ':';\n  if (offer.period_relaxed && o.period) head = `Não há horários ${periodLabel(o.period)} nesse período. ` + head;\n  const body = `${head}\\n\\n${lines.join('\\n')}\\n\\nToque no horário desejado ou responda com o número. Assim que você escolher, eu confirmo na agenda.`;\n  return [msgButtons(body, offer.options.map((x) => ({ id: 'OPT:' + x.option_id, title: x.short_label || x.label })))];\n}\n\nfunction noSlotsMessage(ctx, serviceName) {\n  return msgText(`Não encontrei horários livres para ${serviceName || 'esse atendimento'} nos próximos dias. ` +\n    `Nosso horário de funcionamento é: ${ctx.clinic.hours_summary}. Quer que eu tente outra data ou período, ou prefere falar com a equipe?`);\n}\n\nfunction bookedMessages(ctx, b) {\n  const c = ctx.clinic;\n  const out = [msgText(\n    `Pronto${ctx.patient && ctx.patient.first_name ? ', ' + ctx.patient.first_name : ''}! Sua consulta está agendada ✅\\n\\n` +\n    `📅 ${b.label}\\n🦷 ${b.service_name}\\n👩‍⚕️ ${b.professional_name}\\n📍 ${c.name} — ${c.address}` +\n    (c.maps_url ? `\\n🗺️ ${c.maps_url}` : '') +\n    `\\n\\nVocê receberá um lembrete um dia antes. Para remarcar ou cancelar, é só me escrever por aqui.` +\n    (clinicMsg(ctx, 'cancel_policy') ? `\\n\\n${clinicMsg(ctx, 'cancel_policy')}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction locationMessage(ctx) {\n  const c = ctx.clinic || {};\n  if (c.latitude === null || c.latitude === undefined || c.longitude === null || c.longitude === undefined) return null;\n  return { type: 'location', latitude: Number(c.latitude), longitude: Number(c.longitude), name: c.name, address: c.address };\n}\n\nfunction locationMessages(ctx) {\n  const c = ctx.clinic;\n  const out = [msgText(`📍 ${c.name}\\n${c.address}` + (c.maps_url ? `\\n\\nComo chegar: ${c.maps_url}` : ''))];\n  const loc = locationMessage(ctx);\n  if (loc) out.push(loc);\n  return out;\n}\n\nfunction hoursMessage(ctx) {\n  const c = ctx.clinic;\n  return msgText(`Nosso horário de funcionamento é:\\n${c.hours_summary.split('; ').join('\\n')}` +\n    (c.is_open_now ? '\\n\\nEstamos abertos agora.' : (c.next_opening_label ? `\\n\\nAbrimos novamente ${c.next_opening_label}.` : '')));\n}\n\nfunction appointmentsListText(appts) {\n  return appts.map((a, i) => `${i + 1}) ${a.label} — ${a.service_name} com ${a.professional_name}`).join('\\n');\n}\n\nfunction chooseAppointmentMessage(appts, purpose) {\n  const verb = purpose === 'cancel' ? 'cancelar' : 'remarcar';\n  const text = `Você tem estas consultas:\\n\\n${appointmentsListText(appts)}\\n\\nQual delas deseja ${verb}?`;\n  if (appts.length <= 3) return msgButtons(text, appts.map((a, i) => ({ id: 'APPT:' + a.id, title: `${i + 1}) ${a.short_label}` })));\n  return msgList(text, 'Escolher', appts.map((a, i) => ({ id: 'APPT:' + a.id, title: a.short_label, description: `${a.service_name} – ${a.professional_name}` })));\n}\n\nfunction cancelConfirmMessage(label, late, ctx) {\n  const policy = late ? `\\n\\nAtenção: ${clinicMsg(ctx, 'cancel_policy', 'o cancelamento está sendo feito com pouca antecedência.')}` : '';\n  return msgButtons(`Confirma o cancelamento da consulta de ${label}?${policy}`, [\n    { id: 'YES', title: 'Sim, cancelar' },\n    { id: 'NO', title: 'Não, manter' },\n  ]);\n}\n\nfunction serviceInfoMessages(ctx, svc) {\n  const parts = [`Sim! Fazemos ${svc.name.toLowerCase()}.`];\n  if (svc.description) parts.push(svc.description);\n  if (svc.price_info) parts.push(svc.price_info);\n  const out = [msgText(parts.join(' '))];\n  if (svc.bookable_by_bot) out.push(msgButtons('Quer que eu veja os horários disponíveis?', [{ id: 'SVC:' + svc.code, title: 'Ver horários' }, { id: 'MENU:HUMAN', title: 'Falar com a equipe' }]));\n  else out.push(msgButtons('Esse agendamento é feito pela nossa equipe. Posso chamar alguém para você?', [{ id: 'MENU:HUMAN', title: 'Sim, por favor' }]));\n  return out;\n}\n\nfunction notUnderstoodMessage(ctx, aiReply) {\n  return menuMessage((aiReply && aiReply.length > 3 ? aiReply + '\\n\\n' : 'Desculpe, não entendi muito bem. ') +\n    'Posso ajudar com agendamentos, remarcações, cancelamentos e informações da clínica.');\n}\n\nfunction technicalErrorMessage() {\n  return msgText('Desculpe, tive uma instabilidade técnica agora. Já avisei a nossa equipe, que vai continuar o seu atendimento por aqui.');\n}\n\nfunction unsupportedMediaMessage() {\n  return msgText('Por aqui eu consigo entender mensagens de texto e áudio. Por segurança, não envie fotos, exames ou documentos. Como posso ajudar?');\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n\n// ===== lógica do nó =====\nconst j = $json.input; const r = $json.result || {};\nconst text = r.status === 'ok' ? 'Presença confirmada para ' + r.label + '. Obrigado e até lá! 😊' : 'Não encontrei essa consulta para confirmar. Posso ajudar com outra coisa?';\nreturn { json: Object.assign({}, j, { next: 'done', result: { messages: [msgText(text)], state: 'idle', context: {} } }) };\n"
+      },
+      "id": "78852c22-dbdd-4990-8ffc-5a345da62783",
+      "name": "Presença confirmada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "47672e6b-6eb1-4f59-8368-c6fc144e1acd",
+                    "leftValue": "={{ $json.next }}",
+                    "rightValue": "handoff",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "handoff"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2a5cd6e1-c242-42fd-8302-ccd40ee4ec6d",
+                    "leftValue": "={{ $json.next }}",
+                    "rightValue": "done",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "done"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "outro"
+        }
+      },
+      "id": "1cedacc0-281d-475f-83d0-602022474c7d",
+      "name": "Encaminhar",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2500,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf05Humano000",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "cffad1e5-0999-454d-8af7-2d3973922f75",
+      "name": "Transferir para humano (WF05)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2740,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst j = $json;\nreturn { json: { ev: j.ev, ctx: j.ctx, decision: j.decision, ir: j.ir, ai_ok: j.ai_ok, errors: j.errors || [],\n  result: j.result || { messages: [], state: 'idle', context: {} } } };\n"
+      },
+      "id": "4a8ba61c-2c6f-4c8d-84a2-86f3d10e8553",
+      "name": "Retorno",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2980,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Entrada": {
+      "main": [
+        [
+          {
+            "node": "Consultas do paciente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultas do paciente": {
+      "main": [
+        [
+          {
+            "node": "Decidir ação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir ação": {
+      "main": [
+        [
+          {
+            "node": "Próximo passo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Próximo passo": {
+      "main": [
+        [
+          {
+            "node": "Verificar cancelamento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Solicitar cancelamento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Verificar remarcação",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Confirmar presença",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar cancelamento": {
+      "main": [
+        [
+          {
+            "node": "Pedir confirmação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pedir confirmação": {
+      "main": [
+        [
+          {
+            "node": "Encaminhar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solicitar cancelamento": {
+      "main": [
+        [
+          {
+            "node": "Avaliar pedido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avaliar pedido": {
+      "main": [
+        [
+          {
+            "node": "Cancelamento aceito?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancelamento aceito?": {
+      "main": [
+        [
+          {
+            "node": "Remover da agenda (WF08)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Encaminhar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remover da agenda (WF08)": {
+      "main": [
+        [
+          {
+            "node": "Removido da agenda?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Removido da agenda?": {
+      "main": [
+        [
+          {
+            "node": "Concluir cancelamento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reverter cancelamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Concluir cancelamento": {
+      "main": [
+        [
+          {
+            "node": "Cancelamento concluído",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancelamento concluído": {
+      "main": [
+        [
+          {
+            "node": "Encaminhar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reverter cancelamento": {
+      "main": [
+        [
+          {
+            "node": "Falha no cancelamento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falha no cancelamento": {
+      "main": [
+        [
+          {
+            "node": "Encaminhar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar remarcação": {
+      "main": [
+        [
+          {
+            "node": "Preparar remarcação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar remarcação": {
+      "main": [
+        [
+          {
+            "node": "Oferecer horários?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Oferecer horários?": {
+      "main": [
+        [
+          {
+            "node": "Oferecer novos horários (WF02)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Encaminhar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Oferecer novos horários (WF02)": {
+      "main": [
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmar presença": {
+      "main": [
+        [
+          {
+            "node": "Presença confirmada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Presença confirmada": {
+      "main": [
+        [
+          {
+            "node": "Encaminhar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Encaminhar": {
+      "main": [
+        [
+          {
+            "node": "Transferir para humano (WF05)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transferir para humano (WF05)": {
+      "main": [
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": false,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "RiaWf06Monitoram"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "generatedBy": "recepcionista-ia/scripts/build-workflows.mjs"
+  },
+  "tags": []
+}

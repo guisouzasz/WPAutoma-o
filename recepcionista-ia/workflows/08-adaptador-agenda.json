@@ -1,0 +1,587 @@
+{
+  "id": "RiaWf08AdaptAgen",
+  "name": "Recepcionista IA - 08 Adaptador de Agenda",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 08 · Adaptador de agenda\nOperações: **freebusy**, **create_event** (ID determinístico = idempotente), **delete_event**, **list_events**.\n\nProvedores: Google Calendar (credencial OAuth2 *Recepcionista IA - Google Calendar*) ou API externa (credencial *Recepcionista IA - API Agenda Externa*, contrato em docs/ADAPTADOR-AGENDA.md).\n\nFalhas são registradas em ria.integration_errors e devolvidas com ok=false — quem chamou decide (nunca inventa disponibilidade).",
+        "height": 260,
+        "width": 520,
+        "color": 7
+      },
+      "id": "4fec2eb0-e168-492b-8846-6445b77b89f9",
+      "name": "Sobre",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "6ccfb2a8-8322-4d7f-84d0-f0411a74bc9d",
+      "name": "Entrada",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/calendar.js =====\n// calendar.js — contrato normalizado de agenda (Google Calendar ou software odontológico).\n// Toda a lógica de horários livres está no PostgreSQL; aqui apenas convertemos formatos.\n// Requer: util.js\n\n// ---------- Google Calendar ----------\nfunction googleFreeBusyBody(pros, timeMin, timeMax, tz) {\n  return { timeMin, timeMax, timeZone: tz || 'America/Sao_Paulo', items: pros.filter((p) => p.calendar_id).map((p) => ({ id: p.calendar_id })) };\n}\n\n// Converte a resposta do FreeBusy em ocupações por profissional.\n// Se algum calendário falhar, o profissional fica \"não verificado\" e NÃO é oferecido.\nfunction normalizeGoogleFreeBusy(resp, pros) {\n  const cals = (resp && resp.calendars) || {};\n  const busy = [];\n  const verified = [];\n  const failed = [];\n  for (const p of pros) {\n    const cal = p.calendar_id ? cals[p.calendar_id] : null;\n    if (!cal || (Array.isArray(cal.errors) && cal.errors.length)) { failed.push(p.id); continue; }\n    verified.push(p.id);\n    for (const b of cal.busy || []) if (b.start && b.end) busy.push({ professional_id: p.id, start: b.start, end: b.end });\n  }\n  return { busy, verified, failed };\n}\n\nfunction googleEventBody(hold) {\n  return {\n    id: hold.calendar_event_id, // ID determinístico: repetir a criação não duplica o evento\n    summary: `${hold.service_name} — ${hold.patient_name}`,\n    description: `Agendado pela Recepcionista IA (WhatsApp).\\nPaciente: ${hold.patient_name}\\nTelefone: ${hold.patient_phone}\\nServiço: ${hold.service_name}\\nProfissional: ${hold.professional_name}\\nRef.: ${hold.appointment_id}`,\n    start: { dateTime: hold.starts_at, timeZone: hold.timezone },\n    end: { dateTime: hold.ends_at, timeZone: hold.timezone },\n    transparency: 'opaque',\n    extendedProperties: { private: { ria_appointment_id: hold.appointment_id, ria_source: 'recepcionista-ia' } },\n  };\n}\n\nfunction normalizeGoogleEvents(resp) {\n  return ((resp && resp.items) || [])\n    .filter((e) => e && e.start && e.start.dateTime && e.transparency !== 'transparent')\n    .map((e) => ({\n      id: e.id, status: e.status || 'confirmed', start: e.start.dateTime, end: (e.end && e.end.dateTime) || e.start.dateTime,\n      ria_appointment_id: (e.extendedProperties && e.extendedProperties.private && e.extendedProperties.private.ria_appointment_id) || null,\n    }));\n}\n\n// ---------- Adaptador para software odontológico (API própria da clínica) ----------\n// Contrato esperado (documentado em docs/ADAPTADOR-AGENDA.md):\n//  POST   {base}/availability  {professional_refs[], time_min, time_max} -> {busy:[{professional_ref,start,end}]}\n//  POST   {base}/appointments  {id, professional_ref, start, end, patient_name, patient_phone, service_code} -> {event_id}\n//  DELETE {base}/appointments/{event_id}\n//  GET    {base}/appointments?professional_ref=&time_min=&time_max= -> {events:[{id,start,end,status,ria_appointment_id}]}\nfunction externalAvailabilityBody(pros, timeMin, timeMax) {\n  return { professional_refs: pros.filter((p) => p.external_ref).map((p) => p.external_ref), time_min: timeMin, time_max: timeMax };\n}\n\nfunction normalizeExternalBusy(resp, pros) {\n  const byRef = {};\n  for (const p of pros) if (p.external_ref) byRef[p.external_ref] = p.id;\n  if (!resp || !Array.isArray(resp.busy)) return { busy: [], verified: [], failed: pros.map((p) => p.id) };\n  const busy = resp.busy.filter((b) => byRef[b.professional_ref]).map((b) => ({ professional_id: byRef[b.professional_ref], start: b.start, end: b.end }));\n  return { busy, verified: pros.filter((p) => p.external_ref).map((p) => p.id), failed: pros.filter((p) => !p.external_ref).map((p) => p.id) };\n}\n\nfunction externalEventBody(hold) {\n  return { id: hold.calendar_event_id, professional_ref: hold.external_ref, start: hold.starts_at, end: hold.ends_at,\n    patient_name: hold.patient_name, patient_phone: hold.patient_phone, service_code: hold.service_code, ria_appointment_id: hold.appointment_id };\n}\n\n\n// ===== lógica do nó =====\nconst j = $json;\nconst c = j.calendar || {};\nconst s = c.settings || {};\nconst enc = encodeURIComponent;\nconst qs = (o) => Object.keys(o).filter((k) => o[k] !== undefined && o[k] !== null).map((k) => enc(k) + '=' + enc(o[k])).join('&');\nlet req = null;\nif (c.provider === 'external') {\n  const base = String((c.clinic && c.clinic.external_calendar_base_url) || '').replace(/\\/$/, '');\n  if (!/^https:\\/\\//.test(base) && !/^http:\\/\\/(localhost|127\\.0\\.0\\.1|mock)/.test(base)) req = { skip: true, error: 'URL da API externa não configurada (https obrigatório)' };\n  else if (c.op === 'freebusy') req = { method: 'POST', url: base + '/availability', body: externalAvailabilityBody(c.professionals || [], c.time_min, c.time_max) };\n  else if (c.op === 'create_event') req = { method: 'POST', url: base + '/appointments', body: externalEventBody(c.hold) };\n  else if (c.op === 'delete_event') req = c.event_id ? { method: 'DELETE', url: base + '/appointments/' + enc(c.event_id) } : { skip: true, skip_ok: true };\n  else if (c.op === 'list_events') req = { method: 'GET', url: base + '/appointments?' + qs({ professional_ref: c.external_ref, time_min: c.time_min, time_max: c.time_max }) };\n} else {\n  const base = String(s.google_calendar_base || 'https://www.googleapis.com/calendar/v3').replace(/\\/$/, '');\n  if (c.op === 'freebusy') {\n    const pros = (c.professionals || []).filter((p) => p.calendar_id);\n    req = pros.length ? { method: 'POST', url: base + '/freeBusy', body: googleFreeBusyBody(pros, c.time_min, c.time_max, c.timezone) }\n                      : { skip: true, error: 'Profissionais sem calendar_id configurado' };\n  } else if (c.op === 'create_event') {\n    req = c.hold && c.hold.calendar_id ? { method: 'POST', url: base + '/calendars/' + enc(c.hold.calendar_id) + '/events?sendUpdates=none', body: googleEventBody(c.hold) }\n                                       : { skip: true, error: 'Profissional sem calendar_id' };\n  } else if (c.op === 'delete_event') {\n    req = c.event_id && c.calendar_id ? { method: 'DELETE', url: base + '/calendars/' + enc(c.calendar_id) + '/events/' + enc(c.event_id) + '?sendUpdates=none' }\n                                      : { skip: true, skip_ok: true };\n  } else if (c.op === 'list_events') {\n    req = { method: 'GET', url: base + '/calendars/' + enc(c.calendar_id) + '/events?' + qs({ timeMin: c.time_min, timeMax: c.time_max, singleEvents: 'true', showDeleted: 'true', maxResults: '2500' }) };\n  }\n}\nif (!req) req = { skip: true, error: 'Operação de agenda inválida: ' + c.op };\nconst provider = c.provider === 'external' ? 'external' : 'google';\nconst route = req.skip ? 'skip' : provider + (req.method === 'POST' ? '_body' : '_nobody');\nreturn { json: Object.assign({}, j, { __req: req, __route: route }) };\n"
+      },
+      "id": "bdb9e612-5a63-45f5-83d9-ae8504bf8917",
+      "name": "Preparar requisição",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "42a36239-3cd1-45af-8a0e-21532f542c10",
+                    "leftValue": "={{ $json.__route }}",
+                    "rightValue": "google_body",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "google_body"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "d107f437-adbe-4ca6-8d3e-c2d50558818b",
+                    "leftValue": "={{ $json.__route }}",
+                    "rightValue": "google_nobody",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "google_nobody"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "1f3a736c-c8a5-4b93-82a1-894836f0f515",
+                    "leftValue": "={{ $json.__route }}",
+                    "rightValue": "external_body",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "external_body"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c56b6073-38a9-47f3-8f55-8dc361fd66c1",
+                    "leftValue": "={{ $json.__route }}",
+                    "rightValue": "external_nobody",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "external_nobody"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c336bd49-fa5a-40da-89c2-706a9da86937",
+                    "leftValue": "={{ $json.__route }}",
+                    "rightValue": "skip",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "skip"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "outro"
+        }
+      },
+      "id": "cbea1c06-95af-4603-8d93-82c1ce6bb5ce",
+      "name": "Provedor",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.__req.url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__req.body) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "3533efbc-3ac1-4dfc-82f0-1399b8d7f8a8",
+      "name": "Google Calendar (POST)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        -240
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "RiaCredGoogleCal",
+          "name": "Recepcionista IA - Google Calendar"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.__req.method }}",
+        "url": "={{ $json.__req.url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "5d0e4ebd-5dd8-448d-839e-1e79913132e8",
+      "name": "Google Calendar (GET/DELETE)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        -80
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "RiaCredGoogleCal",
+          "name": "Recepcionista IA - Google Calendar"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.__req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.__req.body) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "cd92c6c6-4f80-43db-87e1-8890f7fcb6b1",
+      "name": "API externa (POST)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        80
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RiaCredAgendaExt",
+          "name": "Recepcionista IA - API Agenda Externa"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.__req.method }}",
+        "url": "={{ $json.__req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "2170425c-f53d-4eae-8177-6bd34445d710",
+      "name": "API externa (GET/DELETE)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        240
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RiaCredAgendaExt",
+          "name": "Recepcionista IA - API Agenda Externa"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/calendar.js =====\n// calendar.js — contrato normalizado de agenda (Google Calendar ou software odontológico).\n// Toda a lógica de horários livres está no PostgreSQL; aqui apenas convertemos formatos.\n// Requer: util.js\n\n// ---------- Google Calendar ----------\nfunction googleFreeBusyBody(pros, timeMin, timeMax, tz) {\n  return { timeMin, timeMax, timeZone: tz || 'America/Sao_Paulo', items: pros.filter((p) => p.calendar_id).map((p) => ({ id: p.calendar_id })) };\n}\n\n// Converte a resposta do FreeBusy em ocupações por profissional.\n// Se algum calendário falhar, o profissional fica \"não verificado\" e NÃO é oferecido.\nfunction normalizeGoogleFreeBusy(resp, pros) {\n  const cals = (resp && resp.calendars) || {};\n  const busy = [];\n  const verified = [];\n  const failed = [];\n  for (const p of pros) {\n    const cal = p.calendar_id ? cals[p.calendar_id] : null;\n    if (!cal || (Array.isArray(cal.errors) && cal.errors.length)) { failed.push(p.id); continue; }\n    verified.push(p.id);\n    for (const b of cal.busy || []) if (b.start && b.end) busy.push({ professional_id: p.id, start: b.start, end: b.end });\n  }\n  return { busy, verified, failed };\n}\n\nfunction googleEventBody(hold) {\n  return {\n    id: hold.calendar_event_id, // ID determinístico: repetir a criação não duplica o evento\n    summary: `${hold.service_name} — ${hold.patient_name}`,\n    description: `Agendado pela Recepcionista IA (WhatsApp).\\nPaciente: ${hold.patient_name}\\nTelefone: ${hold.patient_phone}\\nServiço: ${hold.service_name}\\nProfissional: ${hold.professional_name}\\nRef.: ${hold.appointment_id}`,\n    start: { dateTime: hold.starts_at, timeZone: hold.timezone },\n    end: { dateTime: hold.ends_at, timeZone: hold.timezone },\n    transparency: 'opaque',\n    extendedProperties: { private: { ria_appointment_id: hold.appointment_id, ria_source: 'recepcionista-ia' } },\n  };\n}\n\nfunction normalizeGoogleEvents(resp) {\n  return ((resp && resp.items) || [])\n    .filter((e) => e && e.start && e.start.dateTime && e.transparency !== 'transparent')\n    .map((e) => ({\n      id: e.id, status: e.status || 'confirmed', start: e.start.dateTime, end: (e.end && e.end.dateTime) || e.start.dateTime,\n      ria_appointment_id: (e.extendedProperties && e.extendedProperties.private && e.extendedProperties.private.ria_appointment_id) || null,\n    }));\n}\n\n// ---------- Adaptador para software odontológico (API própria da clínica) ----------\n// Contrato esperado (documentado em docs/ADAPTADOR-AGENDA.md):\n//  POST   {base}/availability  {professional_refs[], time_min, time_max} -> {busy:[{professional_ref,start,end}]}\n//  POST   {base}/appointments  {id, professional_ref, start, end, patient_name, patient_phone, service_code} -> {event_id}\n//  DELETE {base}/appointments/{event_id}\n//  GET    {base}/appointments?professional_ref=&time_min=&time_max= -> {events:[{id,start,end,status,ria_appointment_id}]}\nfunction externalAvailabilityBody(pros, timeMin, timeMax) {\n  return { professional_refs: pros.filter((p) => p.external_ref).map((p) => p.external_ref), time_min: timeMin, time_max: timeMax };\n}\n\nfunction normalizeExternalBusy(resp, pros) {\n  const byRef = {};\n  for (const p of pros) if (p.external_ref) byRef[p.external_ref] = p.id;\n  if (!resp || !Array.isArray(resp.busy)) return { busy: [], verified: [], failed: pros.map((p) => p.id) };\n  const busy = resp.busy.filter((b) => byRef[b.professional_ref]).map((b) => ({ professional_id: byRef[b.professional_ref], start: b.start, end: b.end }));\n  return { busy, verified: pros.filter((p) => p.external_ref).map((p) => p.id), failed: pros.filter((p) => !p.external_ref).map((p) => p.id) };\n}\n\nfunction externalEventBody(hold) {\n  return { id: hold.calendar_event_id, professional_ref: hold.external_ref, start: hold.starts_at, end: hold.ends_at,\n    patient_name: hold.patient_name, patient_phone: hold.patient_phone, service_code: hold.service_code, ria_appointment_id: hold.appointment_id };\n}\n\n\n// ===== lógica do nó =====\nconst j = $('Preparar requisição').item.json;\nconst c = j.calendar || {};\nconst r = $json || {};\nconst req = j.__req || {};\nconst status = Number(r.statusCode || 0);\nconst body = typeof r.body === 'string' ? (safeJsonParse(r.body) || r.body) : r.body;\nconst fail = (code, msg) => ({ ok: false, error_code: String(code), error: sanitizeForLog(msg || ('HTTP ' + status), 200) });\nlet res;\nif (req.skip) res = req.skip_ok ? { ok: true, skipped: true } : fail('config', req.error);\nelse if (r.error && !status) res = fail('network', typeof r.error === 'string' ? r.error : (r.error.message || 'erro de rede'));\nelse if (c.op === 'freebusy') {\n  if (status === 200) res = Object.assign({ ok: true }, c.provider === 'external' ? normalizeExternalBusy(body, c.professionals || []) : normalizeGoogleFreeBusy(body, c.professionals || []));\n  else res = fail(status, body && body.error && body.error.message);\n} else if (c.op === 'create_event') {\n  if (status === 200 || status === 201) res = { ok: true, event_id: (body && (body.id || body.event_id)) || (c.hold && c.hold.calendar_event_id) };\n  else if (status === 409) res = { ok: true, event_id: c.hold && c.hold.calendar_event_id, already_existed: true }; // repetição idempotente\n  else res = fail(status, body && body.error && body.error.message);\n} else if (c.op === 'delete_event') {\n  res = [200, 204, 404, 410].includes(status) ? { ok: true, already_deleted: status === 404 || status === 410 } : fail(status, body && body.error && body.error.message);\n} else if (c.op === 'list_events') {\n  if (status === 200) res = { ok: true, events: c.provider === 'external' ? ((body && body.events) || []) : normalizeGoogleEvents(body) };\n  else res = fail(status, body && body.error && body.error.message);\n} else res = fail('op', 'operação desconhecida');\nconst out = Object.assign({}, j, { calendar_result: res });\ndelete out.__req; delete out.__route;\nout.__log = res.ok ? null : { clinic_id: c.clinic && c.clinic.id, source: 'calendar', workflow: '08-adaptador-agenda', node: c.op + '/' + (c.provider || 'google'), error_code: res.error_code, message: res.error };\nreturn { json: out };\n"
+      },
+      "id": "c6280efc-27fa-4796-8e19-4513ace33b2d",
+      "name": "Normalizar resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "bb7e442c-50f8-42d8-8703-6ebe324dfbef",
+              "leftValue": "={{ !!$json.__log }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c8447e0b-996f-4a0e-8a5c-7b2eefe86212",
+      "name": "Falhou?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_log_error($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.__log), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "c3c43913-56a1-4213-8636-e13d68dc7a9c",
+      "name": "Registrar falha de agenda",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1400,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst j = ($json.result !== undefined && $json.input) ? $json.input : $json;\nconst out = Object.assign({}, j);\ndelete out.__log;\nreturn { json: out };\n"
+      },
+      "id": "b6d3f3c6-f40f-486d-875d-0a8140d0ea05",
+      "name": "Retorno",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1620,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Entrada": {
+      "main": [
+        [
+          {
+            "node": "Preparar requisição",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar requisição": {
+      "main": [
+        [
+          {
+            "node": "Provedor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provedor": {
+      "main": [
+        [
+          {
+            "node": "Google Calendar (POST)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google Calendar (GET/DELETE)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "API externa (POST)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "API externa (GET/DELETE)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normalizar resposta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normalizar resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Calendar (POST)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Calendar (GET/DELETE)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API externa (POST)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API externa (GET/DELETE)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar resposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar resposta": {
+      "main": [
+        [
+          {
+            "node": "Falhou?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falhou?": {
+      "main": [
+        [
+          {
+            "node": "Registrar falha de agenda",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar falha de agenda": {
+      "main": [
+        [
+          {
+            "node": "Retorno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": false,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "RiaWf06Monitoram"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "generatedBy": "recepcionista-ia/scripts/build-workflows.mjs"
+  },
+  "tags": []
+}

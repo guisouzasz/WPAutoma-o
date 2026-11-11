@@ -1,0 +1,214 @@
+{
+  "id": "RiaWf00EnviarWpp",
+  "name": "Recepcionista IA - 00 Enviar WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 00 · Enviar WhatsApp\nRecebe mensagens no formato normalizado, monta o payload oficial da Graph API, envia em sequência (ordem preservada), registra o resultado (sem conteúdo) e devolve um resumo.\n\nCredencial: **Recepcionista IA - WhatsApp Cloud API** (token de usuário do sistema).",
+        "height": 220,
+        "width": 460,
+        "color": 7
+      },
+      "id": "dca144b2-54ee-4410-8034-280e6b0373d4",
+      "name": "Sobre",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "c296656f-31be-406d-8cbe-dbd433bb0c06",
+      "name": "Entrada",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n\n// ===== lógica do nó =====\nconst out = [];\nfor (const it of $input.all()) {\n  const j = it.json || {};\n  try {\n    const payload = toGraphPayload(j.to, j.message);\n    const base = j.graph_base || 'https://graph.facebook.com';\n    const version = j.graph_version || 'v23.0';\n    out.push({ json: Object.assign({}, j, { url: base + '/' + version + '/' + j.phone_number_id + '/messages', payload, kind: graphKind(j.message), build_error: null }) });\n  } catch (e) {\n    out.push({ json: Object.assign({}, j, { url: 'http://invalid.invalid/', payload: {}, kind: 'text', build_error: String(e.message || e) }) });\n  }\n}\nreturn out;\n"
+      },
+      "id": "84f5a497-f97c-4d54-898c-6cc388f94823",
+      "name": "Montar payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.url }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "whatsAppApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 250
+            }
+          }
+        }
+      },
+      "id": "2e271d12-1c8d-4831-864c-55d7633dc18b",
+      "name": "Enviar mensagem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "RiaCredWhatsApp1",
+          "name": "Recepcionista IA - WhatsApp Cloud API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\n// ===== lib/util.js =====\n// util.js — funções utilitárias puras (sem dependências).\n// Este arquivo é embutido nos nós Code do n8n pelo gerador (scripts/build-workflows.mjs).\n\nfunction normalizeText(s) {\n  return String(s == null ? '' : s)\n    .normalize('NFD')\n    .replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction truncate(s, max) {\n  const t = String(s == null ? '' : s);\n  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';\n}\n\nfunction isUuid(s) {\n  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);\n}\n\nfunction isIsoDate(s) {\n  if (typeof s !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return false;\n  const d = new Date(s + 'T00:00:00Z');\n  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;\n}\n\nfunction addDays(isoDate, n) {\n  const d = new Date(isoDate + 'T00:00:00Z');\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n}\n\nfunction weekdayOf(isoDate) {\n  return new Date(isoDate + 'T00:00:00Z').getUTCDay(); // 0 = domingo\n}\n\nfunction safeJsonParse(s) {\n  if (s && typeof s === 'object') return s;\n  try {\n    return JSON.parse(s);\n  } catch (e) {\n    return null;\n  }\n}\n\nfunction maskPhone(p) {\n  const s = String(p || '');\n  return s ? '****' + s.slice(-4) : '';\n}\n\n// Remove números longos e e-mails de mensagens de erro antes de registrar\nfunction sanitizeForLog(s, max) {\n  return truncate(\n    String(s == null ? '' : s)\n      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '[email]')\n      .replace(/\\+?\\d[\\d\\s().-]{7,}\\d/g, '[numero]')\n      .replace(/(Bearer|token|access_token|key)[=:\\s]+[A-Za-z0-9._-]{8,}/gi, '$1 [oculto]'),\n    max || 300\n  );\n}\n\n// Data local (AAAA-MM-DD) de um instante ISO no fuso informado\nfunction localDate(iso, tz) {\n  try {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));\n  } catch (e) {\n    return String(iso || '').slice(0, 10);\n  }\n}\n\n// ===== lib/whatsapp.js =====\n// whatsapp.js — monta payloads oficiais da WhatsApp Cloud API (Graph API /messages).\n// Requer: util.js\n\nfunction toGraphPayload(to, msg) {\n  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to).replace(/\\D/g, '') };\n  switch (msg && msg.type) {\n    case 'text':\n      return Object.assign(base, { type: 'text', text: { preview_url: false, body: truncate(msg.text, 4096) } });\n    case 'buttons':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'button', body: { text: truncate(msg.text, 1024) },\n        action: { buttons: msg.buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: truncate(b.title, 20) } })) },\n      } });\n    case 'list':\n      return Object.assign(base, { type: 'interactive', interactive: {\n        type: 'list', body: { text: truncate(msg.text, 1024) },\n        action: { button: truncate(msg.button || 'Opções', 20), sections: [{ title: 'Opções', rows: msg.rows.slice(0, 10).map((r) => {\n          const row = { id: r.id, title: truncate(r.title, 24) };\n          if (r.description) row.description = truncate(r.description, 72);\n          return row;\n        }) }] },\n      } });\n    case 'location':\n      return Object.assign(base, { type: 'location', location: {\n        latitude: msg.latitude, longitude: msg.longitude, name: truncate(msg.name || '', 100), address: truncate(msg.address || '', 200),\n      } });\n    case 'template':\n      return Object.assign(base, { type: 'template', template: { name: msg.name, language: { code: msg.language || 'pt_BR' }, components: msg.components || [] } });\n    default:\n      throw new Error('Tipo de mensagem não suportado: ' + (msg && msg.type));\n  }\n}\n\nfunction graphKind(msg) {\n  return { text: 'text', buttons: 'interactive', list: 'interactive', location: 'location', template: 'template' }[msg.type] || 'text';\n}\n\n// Template Utility de lembrete (aprovado na Meta) com botões de resposta rápida\nfunction buildReminderTemplate(rem) {\n  const tpl = rem.template || {};\n  const params = (tpl.body_params || []).map((k) => ({ type: 'text', text: truncate(String(rem[k] == null ? '' : rem[k]), 60) || '-' }));\n  const components = [];\n  if (params.length) components.push({ type: 'body', parameters: params });\n  (tpl.quick_reply_buttons || []).forEach((b, idx) => {\n    components.push({ type: 'button', sub_type: 'quick_reply', index: String(idx), parameters: [{ type: 'payload', payload: `${b}:${rem.appointment_id}` }] });\n  });\n  return { type: 'template', name: tpl.name, language: tpl.language || 'pt_BR', components };\n}\n\n// Lembrete dentro da janela de 24h (mensagem de sessão, sem template)\nfunction buildReminderSession(rem) {\n  const name = rem.patient_first_name ? `Olá, ${rem.patient_first_name}! ` : 'Olá! ';\n  return {\n    type: 'buttons',\n    text: `${name}Lembrete da sua consulta na ${rem.clinic_name}:\\n\\n📅 ${rem.label}\\n🦷 ${rem.service_name}\\n👩‍⚕️ ${rem.professional_name}\\n📍 ${rem.address}\\n\\nVocê confirma a sua presença?`,\n    buttons: [\n      { id: 'CONFIRM:' + rem.appointment_id, title: 'Confirmar presença' },\n      { id: 'RESCHEDULE:' + rem.appointment_id, title: 'Remarcar' },\n      { id: 'CANCEL:' + rem.appointment_id, title: 'Cancelar' },\n    ],\n  };\n}\n\nfunction buildStaffAlertTemplate(tplCfg, text) {\n  return { type: 'template', name: tplCfg.name, language: tplCfg.language || 'pt_BR',\n    components: [{ type: 'body', parameters: [{ type: 'text', text: truncate(text.replace(/\\s*\\n\\s*/g, ' | '), 900) }] }] };\n}\n\n// Interpreta a resposta do HTTP Request (com \"Never Error\" + resposta completa)\nfunction parseGraphResponse(res) {\n  const status = res && (res.statusCode || res.status);\n  const body = res && (res.body !== undefined ? res.body : res);\n  const parsed = typeof body === 'string' ? safeJsonParse(body) : body;\n  if (status >= 200 && status < 300 && parsed && parsed.messages && parsed.messages[0]) {\n    return { ok: true, wa_message_id: parsed.messages[0].id };\n  }\n  const err = (parsed && parsed.error) || {};\n  return { ok: false, status: status || 0, error_code: String(err.code || status || 'network'), error_title: sanitizeForLog(err.message || err.error_user_msg || 'Falha ao enviar', 200),\n    retryable: !status || status >= 500 || status === 429 || String(err.code) === '131048' || String(err.code) === '130429' };\n}\n\n\n// ===== lógica do nó =====\nconst inputs = $('Montar payload').all();\nreturn $input.all().map((it, i) => {\n  const src = (inputs[i] && inputs[i].json) || {};\n  const j = it.json || {};\n  let r;\n  if (src.build_error) r = { ok: false, error_code: 'build', error_title: sanitizeForLog(src.build_error, 200) };\n  else if (j.error && !j.statusCode) r = { ok: false, error_code: 'network', error_title: sanitizeForLog(typeof j.error === 'string' ? j.error : (j.error.message || 'erro de rede'), 200) };\n  else r = parseGraphResponse(j);\n  return { json: Object.assign({\n    clinic_id: src.clinic_id || null, patient_id: src.patient_id || null, staff_id: src.staff_id || null,\n    purpose: src.purpose || 'reply', kind: src.kind || 'text', meta: src.meta || null, to_masked: maskPhone(src.to),\n  }, r) };\n});\n"
+      },
+      "id": "9d3471ec-55c0-4482-8a5d-5f7db67155d8",
+      "name": "Interpretar respostas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_outbound_record($1::jsonb) AS result;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ clinic_id: $json.clinic_id, patient_id: $json.patient_id, staff_id: $json.staff_id, wa_message_id: $json.wa_message_id || null, kind: $json.kind, purpose: $json.purpose, status: $json.ok ? 'accepted' : 'error', error_code: $json.error_code || null, error_title: $json.error_title || null }) ] }}"
+        }
+      },
+      "id": "ff0562c8-c5b2-46fe-8a5b-e3222bbd157e",
+      "name": "Registrar envio",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst res = $('Interpretar respostas').all().map((i) => i.json);\nreturn [{ json: { sent: res.filter((r) => r.ok).length, failed: res.filter((r) => !r.ok).length, results: res } }];\n"
+      },
+      "id": "ed2bca9d-bcca-4fc0-826f-235819aa5854",
+      "name": "Resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Entrada": {
+      "main": [
+        [
+          {
+            "node": "Montar payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar payload": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Interpretar respostas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar respostas": {
+      "main": [
+        [
+          {
+            "node": "Registrar envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar envio": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": false,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "RiaWf06Monitoram"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "generatedBy": "recepcionista-ia/scripts/build-workflows.mjs"
+  },
+  "tags": []
+}

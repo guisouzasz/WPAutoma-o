@@ -1,0 +1,390 @@
+{
+  "id": "RiaWf07Reconcili",
+  "name": "Recepcionista IA - 07 Reconciliação de Agenda",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 07 · Reconciliação\nA cada 30 min lista os eventos de cada profissional (WF08) e compara com `ria.appointments`:\n- evento removido manualmente → `missing_in_calendar`\n- horário alterado → `time_mismatch`\n- outro evento sobreposto → `conflict`\n(alertas enviados pelo WF06; o robô não cancela nada sozinho).\nTambém repete exclusões que falharam e remove eventos \"órfãos\" de reservas que expiraram.\n\nObs.: a DISPONIBILIDADE nunca depende desta rotina: toda oferta e toda reserva consultam o FreeBusy em tempo real.",
+        "height": 280,
+        "width": 600,
+        "color": 7
+      },
+      "id": "89cac84a-c415-4625-80d1-58d96a0fcc01",
+      "name": "Sobre",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "2688a196-5b67-4e55-8273-49987295bc19",
+      "name": "A cada 30 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "6514a9ff-0e1a-43ad-89b6-fc2a4bcdfbeb",
+      "name": "Execução sob demanda",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_reconcile_targets($1::jsonb) AS result;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({}) ] }}"
+        }
+      },
+      "id": "7d31b2cd-8571-4f7c-86dd-f7f1d216b0e2",
+      "name": "Profissionais com agenda",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst res = ($json && $json.result) || {};\nreturn (res.targets || []).map((t) => ({ json: { target: t, calendar: { op: 'list_events', provider: t.calendar_provider, calendar_id: t.calendar_id,\n  external_ref: t.external_ref, time_min: t.time_min, time_max: t.time_max, settings: res.settings || {},\n  clinic: { id: t.clinic_id, external_calendar_base_url: t.external_calendar_base_url } }, settings: res.settings || {} } }));\n"
+      },
+      "id": "14ccaf6a-432f-40dd-8f34-5220544316ad",
+      "name": "Expandir alvos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf08AdaptAgen",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "5a009395-6370-453e-8ce5-15a18218121c",
+      "name": "Listar eventos (WF08)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "23c2aac6-6863-4d14-8bf2-49fb8b8c3f37",
+              "leftValue": "={{ $json.calendar_result && $json.calendar_result.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6d00aba0-ac9d-450e-8f52-f48241253ef8",
+      "name": "Listagem ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_reconcile($1::jsonb) AS result, $2::jsonb AS input;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ professional_id: $json.target.professional_id, time_min: $json.target.time_min, time_max: $json.target.time_max, events: $json.calendar_result.events }), JSON.stringify($json) ] }}"
+        }
+      },
+      "id": "e4780492-02bf-462a-82a6-a46e88b46ec8",
+      "name": "Reconciliar",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        -60
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nconst out = [];\nfor (const it of $input.all()) {\n  const j = it.json.input || {}; const r = it.json.result || {}; const t = j.target || {};\n  const mk = (eventId, apptId) => ({ json: { appointment_id: apptId, calendar: { op: 'delete_event', provider: t.calendar_provider, calendar_id: t.calendar_id,\n    event_id: eventId, settings: j.settings, clinic: { id: t.clinic_id, external_calendar_base_url: t.external_calendar_base_url } } } });\n  for (const d of r.retry_deletes || []) out.push(mk(d.calendar_event_id, d.appointment_id));\n  for (const o of r.orphan_events || []) out.push(mk(o.calendar_event_id, o.appointment_id));\n}\nreturn out;\n"
+      },
+      "id": "4f2c53d1-23ad-4f87-86f9-39b145205ce8",
+      "name": "Exclusões pendentes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf08AdaptAgen",
+          "mode": "id"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "5b0d1eba-5747-4d98-8b17-00ad47e25020",
+      "name": "Excluir eventos (WF08)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e47e74a7-648f-42ed-87fe-2f0ebd08561d",
+              "leftValue": "={{ $json.calendar_result && $json.calendar_result.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "07cdd552-2c7d-43ae-8b83-3646321471de",
+      "name": "Excluído?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ria.api_mark_calendar_deleted($1::jsonb) AS result;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ appointment_id: $json.appointment_id }) ] }}"
+        }
+      },
+      "id": "a85ad186-95dc-40fc-87a1-ad311ab7c8fe",
+      "name": "Marcar excluído",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1980,
+        -120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "RiaCredPostgres1",
+          "name": "Recepcionista IA - PostgreSQL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "A cada 30 minutos": {
+      "main": [
+        [
+          {
+            "node": "Profissionais com agenda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Profissionais com agenda": {
+      "main": [
+        [
+          {
+            "node": "Expandir alvos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expandir alvos": {
+      "main": [
+        [
+          {
+            "node": "Listar eventos (WF08)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Listar eventos (WF08)": {
+      "main": [
+        [
+          {
+            "node": "Listagem ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Listagem ok?": {
+      "main": [
+        [
+          {
+            "node": "Reconciliar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconciliar": {
+      "main": [
+        [
+          {
+            "node": "Exclusões pendentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exclusões pendentes": {
+      "main": [
+        [
+          {
+            "node": "Excluir eventos (WF08)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Excluir eventos (WF08)": {
+      "main": [
+        [
+          {
+            "node": "Excluído?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Excluído?": {
+      "main": [
+        [
+          {
+            "node": "Marcar excluído",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execução sob demanda": {
+      "main": [
+        [
+          {
+            "node": "Profissionais com agenda",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": false,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "RiaWf06Monitoram",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "generatedBy": "recepcionista-ia/scripts/build-workflows.mjs"
+  },
+  "tags": []
+}

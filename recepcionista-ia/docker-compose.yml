@@ -1,0 +1,123 @@
+# Recepcionista IA — implantação self-hosted (uma VPS por cliente ou várias clínicas na mesma instância).
+# Serviços: PostgreSQL (n8n + dados da recepcionista), n8n, Caddy (HTTPS automático) e rotina de backup.
+# Uso: cp .env.example .env  &&  (preencha o .env)  &&  docker compose up -d
+name: recepcionista-ia
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_DB: postgres
+      N8N_DB_NAME: ${N8N_DB_NAME}
+      N8N_DB_USER: ${N8N_DB_USER}
+      N8N_DB_PASSWORD: ${N8N_DB_PASSWORD}
+      RIA_DB_NAME: ${RIA_DB_NAME}
+      RIA_DB_USER: ${RIA_DB_USER}
+      RIA_DB_PASSWORD: ${RIA_DB_PASSWORD}
+      TZ: America/Sao_Paulo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+      - ./database:/ria-database:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ADMIN_USER} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [interna]
+    # Sem "ports": o banco NÃO fica exposto à internet.
+
+  n8n:
+    image: n8nio/n8n:2.47.3
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Banco interno do n8n (workflows, credenciais criptografadas, execuções)
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${N8N_DB_NAME}
+      DB_POSTGRESDB_USER: ${N8N_DB_USER}
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD}
+      # Segurança
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      N8N_HOST: ${N8N_DOMAIN}
+      N8N_PROTOCOL: https
+      N8N_PORT: 5678
+      WEBHOOK_URL: https://${N8N_DOMAIN}/
+      N8N_PROXY_HOPS: 1
+      N8N_SECURE_COOKIE: "true"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_PUBLIC_API_DISABLED: "true"
+      # Execuções: guarda apenas falhas (para diagnóstico) e por pouco tempo — LGPD
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "false"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: ${N8N_EXECUTIONS_MAX_AGE_HOURS:-72}
+      EXECUTIONS_DATA_PRUNE_MAX_COUNT: 20000
+      # Áudios ficam em disco só durante a execução e são removidos com ela
+      N8N_DEFAULT_BINARY_DATA_MODE: filesystem
+      GENERIC_TIMEZONE: America/Sao_Paulo
+      TZ: America/Sao_Paulo
+      N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-warn}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/import/workflows:ro
+      - ./credentials:/import/credentials:ro
+    networks: [interna]
+    # Sem "ports": o acesso é somente pelo proxy HTTPS.
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on: [n8n]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      N8N_DOMAIN: ${N8N_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+      ADMIN_ALLOWED_IPS: ${ADMIN_ALLOWED_IPS}
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [interna]
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_ADMIN_USER}
+      PGPASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      BACKUP_DATABASES: "${N8N_DB_NAME} ${RIA_DB_NAME}"
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_HOUR: ${BACKUP_HOUR:-2}
+      TZ: America/Sao_Paulo
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup-loop.sh:/usr/local/bin/backup-loop.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup-loop.sh"]
+    networks: [interna]
+
+volumes:
+  postgres_data:
+  n8n_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  interna:

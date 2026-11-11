@@ -1,0 +1,281 @@
+{
+  "id": "RiaWf99GatilhoTs",
+  "name": "Recepcionista IA - 99 Gatilhos de teste (NÃO usar em produção)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ria-teste-executar",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "d37caf06-7cb5-4c6e-85b7-ff2900f5172b",
+      "name": "Webhook de teste",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "a3f9b018-682c-4ad4-8826-e6890a6e87c6"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "0f3a7fdd-5b57-454c-8c83-e3e92589ce38",
+                    "leftValue": "={{ $json.body.workflow }}",
+                    "rightValue": "lembretes",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "lembretes"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c988d02c-4dcf-4859-870e-895b9a501b14",
+                    "leftValue": "={{ $json.body.workflow }}",
+                    "rightValue": "monitoramento",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "monitoramento"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "f87d8067-59e0-4726-8ff6-627097bdd05e",
+                    "leftValue": "={{ $json.body.workflow }}",
+                    "rightValue": "reconciliacao",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reconciliacao"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "outro"
+        }
+      },
+      "id": "b934bf28-516c-4385-8663-75f3424449f1",
+      "name": "Qual workflow?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf04Lembretes",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "6a3a64a5-e0e5-4512-8ca6-8cbafaf9fa9a",
+      "name": "Lembretes (WF04)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        460,
+        -120
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf06Monitoram",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "5f369376-89c0-4917-8828-f7c738a00678",
+      "name": "Monitoramento (WF06)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        460,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "RiaWf07Reconcili",
+          "mode": "id"
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "f8c7ad9c-474c-4416-8deb-bd1c1e2dc7fb",
+      "name": "Reconciliação (WF07)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        460,
+        120
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Gerado por scripts/build-workflows.mjs — edite src/workflows/ e src/lib/.\nreturn [{ json: { ok: true } }];\n"
+      },
+      "id": "78adcb87-42fb-4e20-8dc5-fa5372af073d",
+      "name": "Fim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook de teste": {
+      "main": [
+        [
+          {
+            "node": "Qual workflow?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qual workflow?": {
+      "main": [
+        [
+          {
+            "node": "Lembretes (WF04)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Monitoramento (WF06)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reconciliação (WF07)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lembretes (WF04)": {
+      "main": [
+        [
+          {
+            "node": "Fim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monitoramento (WF06)": {
+      "main": [
+        [
+          {
+            "node": "Fim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconciliação (WF07)": {
+      "main": [
+        [
+          {
+            "node": "Fim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": false,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "generatedBy": "recepcionista-ia/scripts/build-workflows.mjs"
+  },
+  "tags": []
+}

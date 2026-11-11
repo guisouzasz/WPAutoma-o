@@ -1,0 +1,18 @@
+{
+  "name": "recepcionista-ia",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Recepcionista virtual para clínicas odontológicas — workflows n8n, WhatsApp Cloud API, OpenAI, Google Calendar e PostgreSQL",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "scripts/montar-schema.sh && node scripts/build-workflows.mjs",
+    "validar": "node scripts/validar-workflows.mjs workflows/*.json tests/e2e/workflows/*.json",
+    "test:unit": "node --test tests/unit/*.test.mjs",
+    "test:db": "tests/sql/rodar-testes-banco.sh",
+    "test:concorrencia": "tests/testes-de-concorrencia/corrida-mesmo-horario.sh 25",
+    "test:e2e": "node tests/e2e/rodar-e2e.mjs",
+    "clinica:sql": "node scripts/gerar-sql-clinica.mjs"
+  }
+}
